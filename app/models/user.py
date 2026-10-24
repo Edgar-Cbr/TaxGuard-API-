@@ -1,8 +1,8 @@
 """User and Subscription SQLAlchemy 2.0 ORM models."""
 
-from datetime import datetime
-from enum import Enum
 import uuid
+from datetime import datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
@@ -16,15 +16,17 @@ if TYPE_CHECKING:
     from app.models.api_key import ApiKey
 
 
-class UserTier(str, Enum):
+class UserTier(StrEnum):
     """Subscription tiers available for users."""
+
     FREE = "FREE"
     PRO = "PRO"
     ENTERPRISE = "ENTERPRISE"
 
 
-class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """User account entity."""
+
     __tablename__ = "users"
 
     email: Mapped[str] = mapped_column(
@@ -63,12 +65,19 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         lazy="selectin",
     )
 
+    def __init__(self, **kwargs):
+        kwargs.setdefault("id", uuid.uuid4())
+        kwargs.setdefault("tier", UserTier.FREE)
+        kwargs.setdefault("is_active", True)
+        super().__init__(**kwargs)
+
     def __repr__(self) -> str:
         return f"<User id={self.id} email={self.email} tier={self.tier}>"
 
 
-class Subscription(Base, UUIDPrimaryKeyMixin):
+class Subscription(UUIDPrimaryKeyMixin, Base):
     """User subscription and API consumption plan."""
+
     __tablename__ = "subscriptions"
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -77,7 +86,7 @@ class Subscription(Base, UUIDPrimaryKeyMixin):
         unique=True,
         nullable=False,
     )
-    stripe_customer_id: Mapped[Optional[str]] = mapped_column(
+    stripe_customer_id: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
     )
@@ -91,7 +100,7 @@ class Subscription(Base, UUIDPrimaryKeyMixin):
         default=5,
         nullable=False,
     )
-    current_period_end: Mapped[Optional[datetime]] = mapped_column(
+    current_period_end: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
@@ -102,5 +111,11 @@ class Subscription(Base, UUIDPrimaryKeyMixin):
         back_populates="subscription",
     )
 
+    def __init__(self, **kwargs):
+        kwargs.setdefault("monthly_quota", 1000)
+        kwargs.setdefault("rate_limit_per_sec", 5)
+        super().__init__(**kwargs)
+
     def __repr__(self) -> str:
         return f"<Subscription id={self.id} user_id={self.user_id} quota={self.monthly_quota}>"
+

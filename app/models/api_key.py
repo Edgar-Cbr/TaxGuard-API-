@@ -1,10 +1,10 @@
 """ApiKey SQLAlchemy 2.0 ORM model."""
 
-from datetime import datetime
 import uuid
-from typing import TYPE_CHECKING, Optional
+from datetime import datetime
+from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, CHAR, DateTime, ForeignKey, String
+from sqlalchemy import CHAR, Boolean, DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -15,8 +15,9 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class ApiKey(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+class ApiKey(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """API Key credentials model storing secure SHA-256 hashes and metadata."""
+
     __tablename__ = "api_keys"
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -45,11 +46,11 @@ class ApiKey(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         default=True,
         nullable=False,
     )
-    revoked_at: Mapped[Optional[datetime]] = mapped_column(
+    revoked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
-    last_used_at: Mapped[Optional[datetime]] = mapped_column(
+    last_used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
@@ -66,5 +67,11 @@ class ApiKey(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         lazy="selectin",
     )
 
+    def __init__(self, **kwargs):
+        kwargs.setdefault("name", "Default Key")
+        kwargs.setdefault("is_active", True)
+        super().__init__(**kwargs)
+
     def __repr__(self) -> str:
         return f"<ApiKey id={self.id} prefix={self.key_prefix} active={self.is_active}>"
+

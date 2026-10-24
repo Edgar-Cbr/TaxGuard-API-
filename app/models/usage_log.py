@@ -1,7 +1,7 @@
 """UsageLog SQLAlchemy 2.0 ORM model for asynchronous audit and analytics."""
 
-from datetime import datetime
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, SmallInteger, String
@@ -14,8 +14,9 @@ if TYPE_CHECKING:
     from app.models.api_key import ApiKey
 
 
-class UsageLog(Base, TimestampMixin):
+class UsageLog(TimestampMixin, Base):
     """Audit log tracking API key consumption, endpoints, status codes, and latency."""
+
     __tablename__ = "usage_logs"
 
     id: Mapped[int] = mapped_column(
