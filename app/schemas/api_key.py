@@ -49,3 +49,19 @@ class ApiKeyRevokeResponse(BaseModel):
 
     message: str = "API Key successfully revoked."
     revoked_key_id: uuid.UUID
+
+
+class UserUsageStatsResponse(BaseModel):
+    """Aggregated usage metrics and status breakdown for authenticated user."""
+
+    total_calls: int = Field(description="Total requests recorded across all user keys")
+    avg_latency_ms: float = Field(description="Average latency in milliseconds")
+    status_codes: dict[str, int] = Field(
+        default_factory=dict,
+        description="Breakdown of responses grouped by HTTP status code (e.g. 200, 422, 429)",
+    )
+    monthly_quota: int = Field(
+        description="Total monthly requests allowed under active tier"
+    )
+    quota_remaining: int = Field(description="Remaining monthly requests")
+    tier: str = Field(description="Active user tier (FREE, PRO, ENTERPRISE)")
