@@ -74,4 +74,3 @@ class ApiKey(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     def __repr__(self) -> str:
         return f"<ApiKey id={self.id} prefix={self.key_prefix} active={self.is_active}>"
-
