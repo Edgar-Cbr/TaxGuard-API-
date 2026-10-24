@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -19,12 +19,14 @@ from app.core.exceptions import EntityNotFoundException
 from app.core.rate_limit import ApiKeyMetadata
 from app.core.security import generate_api_key
 from app.models.api_key import ApiKey
+from app.models.usage_log import UsageLog
 from app.models.user import User
 from app.schemas.api_key import (
     ApiKeyCreatedResponse,
     ApiKeyCreateRequest,
     ApiKeyResponse,
     ApiKeyRevokeResponse,
+    UserUsageStatsResponse,
 )
 
 router = APIRouter()
@@ -144,3 +146,54 @@ async def verify_key(
         "monthly_quota": metadata.monthly_quota,
         "rate_limit_per_sec": metadata.rate_limit_per_sec,
     }
+
+
+@router.get(
+    "/usage",
+    response_model=UserUsageStatsResponse,
+    summary="Get aggregated API usage statistics for current user",
+)
+async def get_user_usage_stats(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UserUsageStatsResponse:
+    """Return aggregated consumption statistics, status codes breakdown, and average latency."""
+    # 1. Total calls and average latency across all user keys
+    stats_stmt = (
+        select(
+            func.count(UsageLog.id).label("total"),
+            func.coalesce(func.avg(UsageLog.latency_ms), 0.0).label("avg_lat"),
+        )
+        .join(ApiKey, UsageLog.api_key_id == ApiKey.id)
+        .where(ApiKey.user_id == current_user.id)
+    )
+    stats_res = await db.execute(stats_stmt)
+    total_calls, avg_latency = stats_res.one()
+
+    # 2. Status code breakdown
+    codes_stmt = (
+        select(
+            UsageLog.status_code,
+            func.count(UsageLog.id).label("count"),
+        )
+        .join(ApiKey, UsageLog.api_key_id == ApiKey.id)
+        .where(ApiKey.user_id == current_user.id)
+        .group_by(UsageLog.status_code)
+    )
+    codes_res = await db.execute(codes_stmt)
+    status_codes = {str(code): count for code, count in codes_res.all()}
+
+    # Quota calculations
+    sub = current_user.subscription
+    monthly_quota = sub.monthly_quota if sub else 1000
+    quota_remaining = max(0, monthly_quota - total_calls)
+
+    return UserUsageStatsResponse(
+        total_calls=total_calls,
+        avg_latency_ms=round(float(avg_latency), 2),
+        status_codes=status_codes,
+        monthly_quota=monthly_quota,
+        quota_remaining=quota_remaining,
+        tier=current_user.tier.value if hasattr(current_user.tier, "value") else str(current_user.tier),
+    )
+

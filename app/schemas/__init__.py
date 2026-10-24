@@ -5,6 +5,7 @@ from app.schemas.api_key import (
     ApiKeyCreateRequest,
     ApiKeyResponse,
     ApiKeyRevokeResponse,
+    UserUsageStatsResponse,
 )
 from app.schemas.auth import (
     SubscriptionResponse,
@@ -44,4 +45,5 @@ __all__ = [
     "UserLoginRequest",
     "UserRegisterRequest",
     "UserResponse",
+    "UserUsageStatsResponse",
 ]
