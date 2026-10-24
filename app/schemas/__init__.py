@@ -14,13 +14,31 @@ from app.schemas.auth import (
     UserRegisterRequest,
     UserResponse,
 )
+from app.schemas.validator import (
+    BatchValidationRequest,
+    BatchValidationResponse,
+    CorporateEmailValidationRequest,
+    CorporateEmailValidationResponse,
+    PostalCodeValidationRequest,
+    PostalCodeValidationResponse,
+    TaxIdValidationRequest,
+    TaxIdValidationResponse,
+)
 
 __all__ = [
     "ApiKeyCreateRequest",
     "ApiKeyCreatedResponse",
     "ApiKeyResponse",
     "ApiKeyRevokeResponse",
+    "BatchValidationRequest",
+    "BatchValidationResponse",
+    "CorporateEmailValidationRequest",
+    "CorporateEmailValidationResponse",
+    "PostalCodeValidationRequest",
+    "PostalCodeValidationResponse",
     "SubscriptionResponse",
+    "TaxIdValidationRequest",
+    "TaxIdValidationResponse",
     "TokenPayload",
     "TokenResponse",
     "UserLoginRequest",
