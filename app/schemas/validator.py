@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class TaxIdValidationRequest(BaseModel):
     """Payload to validate a Tax Identification Number (RFC / TIN)."""
+
     tax_id: str = Field(
         ...,
         min_length=1,
@@ -16,6 +17,7 @@ class TaxIdValidationRequest(BaseModel):
 
 class TaxIdValidationResponse(BaseModel):
     """Response returned from Tax ID validation."""
+
     model_config = ConfigDict(from_attributes=True)
 
     valid: bool
@@ -30,6 +32,7 @@ class TaxIdValidationResponse(BaseModel):
 
 class PostalCodeValidationRequest(BaseModel):
     """Payload to validate a postal code."""
+
     postal_code: str = Field(
         ...,
         min_length=1,
@@ -48,6 +51,7 @@ class PostalCodeValidationRequest(BaseModel):
 
 class PostalCodeValidationResponse(BaseModel):
     """Response returned from postal code lookup."""
+
     model_config = ConfigDict(from_attributes=True)
 
     valid: bool
@@ -64,6 +68,7 @@ class PostalCodeValidationResponse(BaseModel):
 
 class CorporateEmailValidationRequest(BaseModel):
     """Payload to validate a corporate business email address."""
+
     email: str = Field(
         ...,
         description="Email address to verify",
@@ -77,6 +82,7 @@ class CorporateEmailValidationRequest(BaseModel):
 
 class CorporateEmailValidationResponse(BaseModel):
     """Response returned from corporate email validation."""
+
     model_config = ConfigDict(from_attributes=True)
 
     valid: bool
@@ -93,6 +99,7 @@ class CorporateEmailValidationResponse(BaseModel):
 
 class BatchValidationRequest(BaseModel):
     """Payload for batch multi-entity validation."""
+
     tax_ids: list[str] = Field(default_factory=list, max_length=50)
     postal_codes: list[str] = Field(default_factory=list, max_length=50)
     emails: list[str] = Field(default_factory=list, max_length=50)
@@ -100,6 +107,7 @@ class BatchValidationRequest(BaseModel):
 
 class BatchValidationResponse(BaseModel):
     """Response with bulk validation results."""
+
     tax_ids: list[TaxIdValidationResponse] = Field(default_factory=list)
     postal_codes: list[PostalCodeValidationResponse] = Field(default_factory=list)
     emails: list[CorporateEmailValidationResponse] = Field(default_factory=list)

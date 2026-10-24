@@ -1,7 +1,7 @@
 """Tax Identification Number (RFC / TIN) validation service with Modulo 11 check."""
 
-from datetime import UTC, datetime
 import re
+from datetime import UTC, datetime
 from typing import Any
 
 # SAT Official character-to-value mapping (Anexo 20)
@@ -129,16 +129,22 @@ def validate_rfc(tax_id: str) -> TaxValidationResult:
 
     if length == 13:
         if not RFC_INDIVIDUAL_REGEX.match(normalized):
-            errors.append("Invalid syntax format for Persona Física (expected 4 letters + 6 digits + 3 alphanumeric characters).")
+            errors.append(
+                "Invalid syntax format for Persona Física (expected 4 letters + 6 digits + 3 alphanumeric characters)."
+            )
         entity_type = "INDIVIDUAL"
         date_part = normalized[4:10]
     elif length == 12:
         if not RFC_LEGAL_ENTITY_REGEX.match(normalized):
-            errors.append("Invalid syntax format for Persona Moral (expected 3 letters + 6 digits + 3 alphanumeric characters).")
+            errors.append(
+                "Invalid syntax format for Persona Moral (expected 3 letters + 6 digits + 3 alphanumeric characters)."
+            )
         entity_type = "LEGAL_ENTITY"
         date_part = normalized[3:9]
     else:
-        errors.append(f"Invalid Tax ID length ({length} characters). Must be 12 (Legal Entity) or 13 (Individual).")
+        errors.append(
+            f"Invalid Tax ID length ({length} characters). Must be 12 (Legal Entity) or 13 (Individual)."
+        )
         return TaxValidationResult(
             valid=False,
             entity_type="UNKNOWN",
@@ -160,7 +166,9 @@ def validate_rfc(tax_id: str) -> TaxValidationResult:
     checksum_valid = expected_checksum == provided_checksum
 
     if not checksum_valid:
-        errors.append(f"Checksum mismatch: expected '{expected_checksum}', received '{provided_checksum}'.")
+        errors.append(
+            f"Checksum mismatch: expected '{expected_checksum}', received '{provided_checksum}'."
+        )
 
     is_valid = bool(len(errors) == 0 and checksum_valid and date_valid)
 

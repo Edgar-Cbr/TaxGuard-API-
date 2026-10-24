@@ -2,6 +2,7 @@
 
 import asyncio
 from typing import Any
+
 import dns.exception
 import dns.resolver
 from pydantic import EmailStr, TypeAdapter
@@ -142,9 +143,13 @@ async def validate_corporate_email(
     is_corporate = bool(not is_disposable and not is_free)
 
     if is_disposable:
-        errors.append(f"Domain '{domain}' belongs to a temporary/disposable email provider.")
+        errors.append(
+            f"Domain '{domain}' belongs to a temporary/disposable email provider."
+        )
     elif is_free:
-        errors.append(f"Domain '{domain}' belongs to a free consumer email provider, not a corporate domain.")
+        errors.append(
+            f"Domain '{domain}' belongs to a free consumer email provider, not a corporate domain."
+        )
 
     # 3. DNS MX resolution
     mx_records: list[str] = []
@@ -153,7 +158,9 @@ async def validate_corporate_email(
         mx_records = await asyncio.to_thread(_resolve_mx_sync, domain)
         has_mx = len(mx_records) > 0
         if not has_mx:
-            errors.append(f"Domain '{domain}' does not have any active MX (Mail Exchange) DNS records.")
+            errors.append(
+                f"Domain '{domain}' does not have any active MX (Mail Exchange) DNS records."
+            )
 
     is_valid = bool(syntax_valid and is_corporate and (has_mx or not check_dns))
 

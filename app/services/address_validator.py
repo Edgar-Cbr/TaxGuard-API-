@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 from typing import Any
+
 from redis.asyncio import Redis
 
 POSTAL_CODES_FILE = Path(__file__).parent.parent / "data" / "postal_codes.json"
@@ -90,7 +91,9 @@ async def validate_postal_code(
             valid=False,
             country_code=clean_country,
             postal_code=clean_zip,
-            errors=[f"Invalid postal code format: expected 5 digits, received '{clean_zip}'."],
+            errors=[
+                f"Invalid postal code format: expected 5 digits, received '{clean_zip}'."
+            ],
         )
 
     cache_key = f"catalog:zip:{clean_country}:{clean_zip}"
@@ -125,7 +128,9 @@ async def validate_postal_code(
             valid=False,
             country_code=clean_country,
             postal_code=clean_zip,
-            errors=[f"Postal code '{clean_zip}' not found in official {clean_country} catalog."],
+            errors=[
+                f"Postal code '{clean_zip}' not found in official {clean_country} catalog."
+            ],
         )
 
     # 3. Cache result in Redis for 24 hours (86400 seconds)

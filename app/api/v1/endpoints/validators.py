@@ -123,7 +123,9 @@ async def validate_batch_endpoint(
     # 2. Validate Postal Codes
     postal_results = [
         PostalCodeValidationResponse(
-            **(await validate_postal_code(zip_code, redis_client=redis_client)).to_dict()
+            **(
+                await validate_postal_code(zip_code, redis_client=redis_client)
+            ).to_dict()
         )
         for zip_code in payload.postal_codes
     ]
