@@ -1,8 +1,8 @@
 """API Key management endpoints: creation, listing, and revocation."""
 
+import uuid
 from datetime import UTC, datetime
 from typing import Annotated
-import uuid
 
 from fastapi import APIRouter, Depends, status
 from redis.asyncio import Redis

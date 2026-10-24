@@ -27,7 +27,9 @@ async def get_redis() -> Redis:
 
 
 async def get_current_user(
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_bearer)],
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(security_bearer)
+    ],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
     """Validate Bearer JWT and retrieve authenticated User from database."""

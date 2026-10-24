@@ -1,9 +1,10 @@
 """Security utilities: Bcrypt password hashing, JWT creation/decoding, and API Key cryptography."""
 
-from datetime import UTC, datetime, timedelta
 import hashlib
 import secrets
+from datetime import UTC, datetime, timedelta
 from typing import Any
+
 import bcrypt
 from jose import JWTError, jwt
 
@@ -36,7 +37,9 @@ def create_access_token(
     if expires_delta:
         expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.now(UTC) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(UTC) + timedelta(
+            minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+        )
 
     to_encode = {
         "exp": expire,

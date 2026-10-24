@@ -64,9 +64,7 @@ async def register_user(
 
     # Re-fetch user with subscription loaded
     result = await db.execute(
-        select(User)
-        .options(selectinload(User.subscription))
-        .where(User.id == user.id)
+        select(User).options(selectinload(User.subscription)).where(User.id == user.id)
     )
     user_with_sub = result.scalar_one()
     return user_with_sub

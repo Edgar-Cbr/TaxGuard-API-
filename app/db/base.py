@@ -42,4 +42,3 @@ class UUIDPrimaryKeyMixin:
     def __init__(self, **kwargs):
         kwargs.setdefault("id", uuid.uuid4())
         super().__init__(**kwargs)
-

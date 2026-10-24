@@ -1,12 +1,14 @@
 """Pydantic schemas for API key lifecycle management."""
 
-from datetime import datetime
 import uuid
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class ApiKeyCreateRequest(BaseModel):
     """Payload to request the creation of a new API key."""
+
     name: str = Field(
         default="Default Key",
         max_length=100,
@@ -16,6 +18,7 @@ class ApiKeyCreateRequest(BaseModel):
 
 class ApiKeyCreatedResponse(BaseModel):
     """Response returned upon key creation, revealing plaintext key only once."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -29,6 +32,7 @@ class ApiKeyCreatedResponse(BaseModel):
 
 class ApiKeyResponse(BaseModel):
     """Safe representation of an API key without revealing secrets."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -42,5 +46,6 @@ class ApiKeyResponse(BaseModel):
 
 class ApiKeyRevokeResponse(BaseModel):
     """Confirmation message of API key revocation."""
+
     message: str = "API Key successfully revoked."
     revoked_key_id: uuid.UUID
