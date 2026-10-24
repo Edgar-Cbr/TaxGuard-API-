@@ -9,7 +9,11 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1.router import api_router
 from app.core.config import settings
-from app.core.exceptions import AppException, format_error_response
+from app.core.exceptions import (
+    AppException,
+    RateLimitExceededException,
+    format_error_response,
+)
 from app.core.redis import check_redis_health, close_redis
 from app.db.session import check_db_health, engine
 
@@ -92,12 +96,17 @@ def create_application() -> FastAPI:
     async def app_exception_handler(
         request: Request, exc: AppException
     ) -> JSONResponse:
+        headers = {}
+        if isinstance(exc, RateLimitExceededException) and exc.retry_after is not None:
+            headers["Retry-After"] = str(exc.retry_after)
+
         return format_error_response(
             request=request,
             status_code=exc.status_code,
             error_code=exc.error_code,
             message=exc.message,
             details=exc.details,
+            headers=headers or None,
         )
 
     @application.exception_handler(RequestValidationError)

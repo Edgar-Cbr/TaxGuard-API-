@@ -2,6 +2,7 @@
 
 import os
 from collections.abc import AsyncGenerator
+from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -38,11 +39,44 @@ TestingSessionLocal = async_sessionmaker(
 )
 
 
+class MockPipeline:
+    """Mock Redis Pipeline for atomic batch operations."""
+
+    def __init__(self, store: dict[str, str]):
+        self._store = store
+        self._commands: list[tuple[str, Any]] = []
+
+    def incr(self, key: str, amount: int = 1):
+        self._commands.append(("incr", key, amount))
+        return self
+
+    def expire(self, key: str, seconds: int):
+        self._commands.append(("expire", key, seconds))
+        return self
+
+    async def execute(self) -> list[Any]:
+        results = []
+        for cmd in self._commands:
+            action = cmd[0]
+            if action == "incr":
+                k, amt = cmd[1], cmd[2]
+                current = int(self._store.get(k, 0)) + amt
+                self._store[k] = str(current)
+                results.append(current)
+            elif action == "expire":
+                results.append(True)
+        self._commands.clear()
+        return results
+
+
 class MockRedis:
     """In-memory Redis mock for test isolation."""
 
     def __init__(self):
         self._store: dict[str, str] = {}
+
+    def pipeline(self, transaction: bool = True) -> MockPipeline:
+        return MockPipeline(self._store)
 
     async def get(self, key: str) -> str | None:
         return self._store.get(key)
@@ -54,6 +88,11 @@ class MockRedis:
     async def setex(self, key: str, time: int, value: str) -> bool:
         self._store[key] = str(value)
         return True
+
+    async def incr(self, key: str, amount: int = 1) -> int:
+        current = int(self._store.get(key, 0)) + amount
+        self._store[key] = str(current)
+        return current
 
     async def delete(self, *keys: str) -> int:
         count = 0
@@ -69,11 +108,16 @@ class MockRedis:
     async def close(self) -> None:
         pass
 
+    def clear(self) -> None:
+        self._store.clear()
 
-@pytest.fixture(scope="session")
+
+@pytest.fixture
 def mock_redis() -> MockRedis:
-    """Session-scoped mock Redis client."""
-    return MockRedis()
+    """Per-test mock Redis client."""
+    client = MockRedis()
+    client.clear()
+    return client
 
 
 @pytest.fixture

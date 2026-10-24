@@ -75,6 +75,7 @@ def format_error_response(
     error_code: str,
     message: str,
     details: Any = None,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     """Format standardized RFC 7807-inspired JSON response."""
     request_id = getattr(request.state, "request_id", None) or request.headers.get(
@@ -89,4 +90,4 @@ def format_error_response(
     }
     if details is not None:
         content["details"] = details
-    return JSONResponse(status_code=status_code, content=content)
+    return JSONResponse(status_code=status_code, content=content, headers=headers)
