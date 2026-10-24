@@ -1,7 +1,7 @@
 """Stripe billing webhook and plan management endpoints."""
 
-from typing import Annotated, Any
 import uuid
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, status
 from redis.asyncio import Redis
@@ -53,12 +53,9 @@ async def stripe_webhook(
         )
 
     # Find target user
-    stmt = (
-        select(User)
-        .options(
-            selectinload(User.subscription),
-            selectinload(User.api_keys),
-        )
+    stmt = select(User).options(
+        selectinload(User.subscription),
+        selectinload(User.api_keys),
     )
     if client_ref_id:
         try:

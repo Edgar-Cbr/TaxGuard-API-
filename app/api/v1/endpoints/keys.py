@@ -194,6 +194,7 @@ async def get_user_usage_stats(
         status_codes=status_codes,
         monthly_quota=monthly_quota,
         quota_remaining=quota_remaining,
-        tier=current_user.tier.value if hasattr(current_user.tier, "value") else str(current_user.tier),
+        tier=current_user.tier.value
+        if hasattr(current_user.tier, "value")
+        else str(current_user.tier),
     )
-

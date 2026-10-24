@@ -60,7 +60,8 @@ class UserUsageStatsResponse(BaseModel):
         default_factory=dict,
         description="Breakdown of responses grouped by HTTP status code (e.g. 200, 422, 429)",
     )
-    monthly_quota: int = Field(description="Total monthly requests allowed under active tier")
+    monthly_quota: int = Field(
+        description="Total monthly requests allowed under active tier"
+    )
     quota_remaining: int = Field(description="Remaining monthly requests")
     tier: str = Field(description="Active user tier (FREE, PRO, ENTERPRISE)")
-

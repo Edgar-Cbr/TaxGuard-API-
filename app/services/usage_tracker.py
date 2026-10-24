@@ -1,8 +1,10 @@
 """Asynchronous audit and consumption tracking service for background tasks."""
 
-from datetime import UTC, datetime
 import logging
 import uuid
+from datetime import UTC, datetime
+from typing import Any
+
 from sqlalchemy import update
 
 from app.db.session import async_session_maker
@@ -11,12 +13,15 @@ from app.models.usage_log import UsageLog
 
 logger = logging.getLogger("taxguard.usage_tracker")
 
+session_factory_override: Any = None
+
 
 async def record_usage_log(
     api_key_id: uuid.UUID,
     endpoint: str,
     status_code: int,
     latency_ms: float,
+    session_factory: Any = None,
 ) -> None:
     """Insert a usage log record and update ApiKey.last_used_at in the background.
 
@@ -24,7 +29,8 @@ async def record_usage_log(
     inside FastAPI BackgroundTasks after the HTTP response has already closed.
     """
     now = datetime.now(UTC)
-    async with async_session_maker() as session:
+    factory = session_factory or session_factory_override or async_session_maker
+    async with factory() as session:
         try:
             # 1. Insert UsageLog record
             log_entry = UsageLog(
@@ -38,9 +44,7 @@ async def record_usage_log(
 
             # 2. Update ApiKey.last_used_at timestamp
             stmt = (
-                update(ApiKey)
-                .where(ApiKey.id == api_key_id)
-                .values(last_used_at=now)
+                update(ApiKey).where(ApiKey.id == api_key_id).values(last_used_at=now)
             )
             await session.execute(stmt)
 
