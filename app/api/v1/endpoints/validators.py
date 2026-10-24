@@ -1,8 +1,9 @@
 """B2B Data and Fiscal Validation endpoints protected by API Key and Rate Limiting."""
 
+import time
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from redis.asyncio import Redis
 
 from app.api.deps import get_redis, verify_api_key_and_quota
@@ -20,6 +21,7 @@ from app.schemas.validator import (
 from app.services.address_validator import validate_postal_code
 from app.services.email_validator import validate_corporate_email
 from app.services.tax_validator import validate_rfc
+from app.services.usage_tracker import record_usage_log
 
 router = APIRouter()
 
@@ -31,10 +33,23 @@ router = APIRouter()
 )
 async def validate_tax_id_endpoint(
     payload: TaxIdValidationRequest,
-    _auth: Annotated[ApiKeyMetadata, Depends(verify_api_key_and_quota)],
+    auth: Annotated[ApiKeyMetadata, Depends(verify_api_key_and_quota)],
+    background_tasks: BackgroundTasks,
+    request: Request,
 ) -> TaxIdValidationResponse:
     """Validate a Mexican RFC (Persona Física o Moral) or international TIN."""
+    start_time = time.perf_counter()
     result = validate_rfc(payload.tax_id)
+
+    latency_ms = (time.perf_counter() - start_time) * 1000
+    background_tasks.add_task(
+        record_usage_log,
+        api_key_id=auth.api_key_id,
+        endpoint=request.url.path,
+        status_code=200,
+        latency_ms=latency_ms,
+    )
+
     return TaxIdValidationResponse(
         valid=result.valid,
         entity_type=result.entity_type,
@@ -52,15 +67,28 @@ async def validate_tax_id_endpoint(
 )
 async def validate_postal_code_endpoint(
     payload: PostalCodeValidationRequest,
-    _auth: Annotated[ApiKeyMetadata, Depends(verify_api_key_and_quota)],
+    auth: Annotated[ApiKeyMetadata, Depends(verify_api_key_and_quota)],
     redis_client: Annotated[Redis, Depends(get_redis)],
+    background_tasks: BackgroundTasks,
+    request: Request,
 ) -> PostalCodeValidationResponse:
     """Validate a 5-digit postal code and retrieve city, state, municipality and settlements."""
+    start_time = time.perf_counter()
     result = await validate_postal_code(
         postal_code=payload.postal_code,
         country_code=payload.country_code,
         redis_client=redis_client,
     )
+
+    latency_ms = (time.perf_counter() - start_time) * 1000
+    background_tasks.add_task(
+        record_usage_log,
+        api_key_id=auth.api_key_id,
+        endpoint=request.url.path,
+        status_code=200,
+        latency_ms=latency_ms,
+    )
+
     return PostalCodeValidationResponse(
         valid=result.valid,
         country_code=result.country_code,
@@ -82,13 +110,26 @@ async def validate_postal_code_endpoint(
 )
 async def validate_corporate_email_endpoint(
     payload: CorporateEmailValidationRequest,
-    _auth: Annotated[ApiKeyMetadata, Depends(verify_api_key_and_quota)],
+    auth: Annotated[ApiKeyMetadata, Depends(verify_api_key_and_quota)],
+    background_tasks: BackgroundTasks,
+    request: Request,
 ) -> CorporateEmailValidationResponse:
     """Verify corporate domain status, syntax, disposable domains and live DNS MX records."""
+    start_time = time.perf_counter()
     result = await validate_corporate_email(
         email=payload.email,
         check_dns=payload.check_dns,
     )
+
+    latency_ms = (time.perf_counter() - start_time) * 1000
+    background_tasks.add_task(
+        record_usage_log,
+        api_key_id=auth.api_key_id,
+        endpoint=request.url.path,
+        status_code=200,
+        latency_ms=latency_ms,
+    )
+
     return CorporateEmailValidationResponse(
         valid=result.valid,
         email=result.email,
@@ -110,10 +151,14 @@ async def validate_corporate_email_endpoint(
 )
 async def validate_batch_endpoint(
     payload: BatchValidationRequest,
-    _auth: Annotated[ApiKeyMetadata, Depends(verify_api_key_and_quota)],
+    auth: Annotated[ApiKeyMetadata, Depends(verify_api_key_and_quota)],
     redis_client: Annotated[Redis, Depends(get_redis)],
+    background_tasks: BackgroundTasks,
+    request: Request,
 ) -> BatchValidationResponse:
     """Batch validation endpoint for enterprise onboarding pipelines."""
+    start_time = time.perf_counter()
+
     # 1. Validate Tax IDs
     tax_results = [
         TaxIdValidationResponse(**validate_rfc(tid).to_dict())
@@ -123,9 +168,7 @@ async def validate_batch_endpoint(
     # 2. Validate Postal Codes
     postal_results = [
         PostalCodeValidationResponse(
-            **(
-                await validate_postal_code(zip_code, redis_client=redis_client)
-            ).to_dict()
+            **(await validate_postal_code(zip_code, redis_client=redis_client)).to_dict()
         )
         for zip_code in payload.postal_codes
     ]
@@ -137,6 +180,15 @@ async def validate_batch_endpoint(
         )
         for em in payload.emails
     ]
+
+    latency_ms = (time.perf_counter() - start_time) * 1000
+    background_tasks.add_task(
+        record_usage_log,
+        api_key_id=auth.api_key_id,
+        endpoint=request.url.path,
+        status_code=200,
+        latency_ms=latency_ms,
+    )
 
     return BatchValidationResponse(
         tax_ids=tax_results,
