@@ -37,9 +37,9 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # CORS
-    CORS_ORIGINS: list[str] = ["*"]
+    CORS_ORIGINS: list[str] | str = ["*"]
 
-    @field_validator("CORS_ORIGINS", mode="before")
+    @field_validator("CORS_ORIGINS", mode="after")
     @classmethod
     def assemble_cors_origins(cls, v: Any) -> list[str]:
         if isinstance(v, str):
