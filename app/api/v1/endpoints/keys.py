@@ -9,8 +9,14 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db, get_redis
+from app.api.deps import (
+    get_current_user,
+    get_db,
+    get_redis,
+    verify_api_key_and_quota,
+)
 from app.core.exceptions import EntityNotFoundException
+from app.core.rate_limit import ApiKeyMetadata
 from app.core.security import generate_api_key
 from app.models.api_key import ApiKey
 from app.models.user import User
@@ -120,3 +126,22 @@ async def revoke_api_key(
         message="API Key successfully revoked.",
         revoked_key_id=api_key.id,
     )
+
+
+@router.get(
+    "/verify",
+    summary="Verify X-API-Key status, active rate limits and remaining quota",
+)
+async def verify_key(
+    metadata: Annotated[ApiKeyMetadata, Depends(verify_api_key_and_quota)],
+) -> dict:
+    """Introspection endpoint to test and verify X-API-Key validity and quota."""
+    return {
+        "valid": True,
+        "api_key_id": metadata.api_key_id,
+        "user_id": metadata.user_id,
+        "tier": metadata.tier,
+        "monthly_quota": metadata.monthly_quota,
+        "rate_limit_per_sec": metadata.rate_limit_per_sec,
+    }
+

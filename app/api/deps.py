@@ -3,7 +3,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Header, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.asyncio import Redis
 from sqlalchemy import select
@@ -11,12 +11,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import AuthenticationException
+from app.core.rate_limit import (
+    ApiKeyMetadata,
+    check_rate_limit_and_quota,
+    get_api_key_metadata,
+)
 from app.core.redis import get_redis_client
-from app.core.security import decode_access_token
+from app.core.security import decode_access_token, hash_api_key
 from app.db.session import get_db
 from app.models.user import User
 
-__all__ = ["get_current_user", "get_db", "get_redis"]
+__all__ = [
+    "get_current_user",
+    "get_db",
+    "get_redis",
+    "verify_api_key_and_quota",
+]
 
 security_bearer = HTTPBearer(auto_error=False)
 
@@ -75,3 +85,43 @@ async def get_current_user(
         )
 
     return user
+
+
+async def verify_api_key_and_quota(
+    request: Request,
+    response: Response,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis_client: Annotated[Redis, Depends(get_redis)],
+    x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
+) -> ApiKeyMetadata:
+    """Validate API Key, check sliding-window rate limit, and track monthly quota."""
+    # 1. Extraer header X-API-Key. Si no existe, retornar 401 Unauthorized
+    if not x_api_key or not x_api_key.strip():
+        raise AuthenticationException(
+            message="Missing or empty X-API-Key header.",
+            error_code="MISSING_API_KEY",
+        )
+
+    # 2. Calcular SHA-256 y buscar metadatos en Redis / PostgreSQL
+    key_hash = hash_api_key(x_api_key)
+    metadata = await get_api_key_metadata(
+        key_hash=key_hash,
+        db=db,
+        redis_client=redis_client,
+    )
+
+    # 3. Verificar Rate Limit por segundo y cuota mensual en Redis
+    limit_result = await check_rate_limit_and_quota(
+        metadata=metadata,
+        redis_client=redis_client,
+    )
+
+    # 4. Inyectar encabezados en el objeto Response
+    response.headers["X-RateLimit-Limit"] = str(limit_result.limit)
+    response.headers["X-RateLimit-Remaining"] = str(limit_result.remaining)
+    response.headers["X-Quota-Remaining"] = str(limit_result.quota_remaining)
+
+    # Adjuntar metadatos al estado de la petición para auditoría y logs downstream
+    request.state.api_key_metadata = metadata
+
+    return metadata
