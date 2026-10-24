@@ -1,4 +1,5 @@
 from typing import Any
+
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 
@@ -76,7 +77,9 @@ def format_error_response(
     details: Any = None,
 ) -> JSONResponse:
     """Format standardized RFC 7807-inspired JSON response."""
-    request_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID")
+    request_id = getattr(request.state, "request_id", None) or request.headers.get(
+        "X-Request-ID"
+    )
     content = {
         "status_code": status_code,
         "error_code": error_code,

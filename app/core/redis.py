@@ -1,6 +1,6 @@
 import logging
 import time
-from typing import Optional
+
 import redis.asyncio as aioredis
 from redis.asyncio import Redis
 
@@ -8,7 +8,7 @@ from app.core.config import settings
 
 logger = logging.getLogger("taxguard.redis")
 
-_redis_client: Optional[Redis] = None
+_redis_client: Redis | None = None
 
 
 def get_redis_client() -> Redis:

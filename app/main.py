@@ -1,7 +1,6 @@
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
@@ -24,21 +23,31 @@ logger = logging.getLogger("taxguard.main")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager to handle startup and shutdown events."""
-    logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION} [{settings.ENVIRONMENT}]")
+    logger.info(
+        f"Starting {settings.PROJECT_NAME} v{settings.VERSION} [{settings.ENVIRONMENT}]"
+    )
 
     # Verify Database Connection
     db_health = await check_db_health()
     if db_health.get("available"):
-        logger.info(f"Database connected successfully (latency: {db_health.get('latency_ms')} ms)")
+        logger.info(
+            f"Database connected successfully (latency: {db_health.get('latency_ms')} ms)"
+        )
     else:
-        logger.warning(f"Database connection could not be established on startup: {db_health.get('error')}")
+        logger.warning(
+            f"Database connection could not be established on startup: {db_health.get('error')}"
+        )
 
     # Verify Redis Connection
     redis_health = await check_redis_health()
     if redis_health.get("available"):
-        logger.info(f"Redis connected successfully (latency: {redis_health.get('latency_ms')} ms)")
+        logger.info(
+            f"Redis connected successfully (latency: {redis_health.get('latency_ms')} ms)"
+        )
     else:
-        logger.warning(f"Redis connection could not be established on startup: {redis_health.get('error')}")
+        logger.warning(
+            f"Redis connection could not be established on startup: {redis_health.get('error')}"
+        )
 
     yield
 
@@ -80,7 +89,9 @@ def create_application() -> FastAPI:
 
     # Global Exception Handlers (RFC 7807 compliant)
     @application.exception_handler(AppException)
-    async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
+    async def app_exception_handler(
+        request: Request, exc: AppException
+    ) -> JSONResponse:
         return format_error_response(
             request=request,
             status_code=exc.status_code,
@@ -102,7 +113,9 @@ def create_application() -> FastAPI:
         )
 
     @application.exception_handler(HTTPException)
-    async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    async def http_exception_handler(
+        request: Request, exc: HTTPException
+    ) -> JSONResponse:
         return format_error_response(
             request=request,
             status_code=exc.status_code,
@@ -111,8 +124,12 @@ def create_application() -> FastAPI:
         )
 
     @application.exception_handler(Exception)
-    async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-        logger.exception(f"Unhandled error processing request {request.url.path}: {exc}")
+    async def unhandled_exception_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        logger.exception(
+            f"Unhandled error processing request {request.url.path}: {exc}"
+        )
         return format_error_response(
             request=request,
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -156,7 +173,9 @@ def create_application() -> FastAPI:
 
         # Return 200 in development/testing or degraded, but indicate accurate service status
         return JSONResponse(
-            status_code=status.HTTP_200_OK if is_healthy else status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=status.HTTP_200_OK
+            if is_healthy
+            else status.HTTP_503_SERVICE_UNAVAILABLE,
             content=payload,
         )
 
