@@ -82,3 +82,7 @@ redisdata/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Internal blueprints & planning
+BLUEPRINT.md
+plan_maestro_del_proyecto_taxguard_api.md
