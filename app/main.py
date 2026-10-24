@@ -9,7 +9,11 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1.router import api_router
 from app.core.config import settings
-from app.core.exceptions import AppException, RateLimitExceededException, format_error_response
+from app.core.exceptions import (
+    AppException,
+    RateLimitExceededException,
+    format_error_response,
+)
 from app.core.redis import check_redis_health, close_redis
 from app.db.session import check_db_health, engine
 

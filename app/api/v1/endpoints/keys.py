@@ -144,4 +144,3 @@ async def verify_key(
         "monthly_quota": metadata.monthly_quota,
         "rate_limit_per_sec": metadata.rate_limit_per_sec,
     }
-

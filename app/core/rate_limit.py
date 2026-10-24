@@ -1,8 +1,9 @@
 """Sliding window rate limiting and monthly quota tracking via Redis."""
 
-from datetime import UTC, datetime
 import json
 import uuid
+from datetime import UTC, datetime
+
 from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
 from sqlalchemy import select
@@ -16,6 +17,7 @@ from app.models.user import User, UserTier
 
 class ApiKeyMetadata(BaseModel):
     """Cached metadata model for fast O(1) API Key authorization and limits."""
+
     model_config = ConfigDict(from_attributes=True)
 
     api_key_id: uuid.UUID
@@ -28,6 +30,7 @@ class ApiKeyMetadata(BaseModel):
 
 class RateLimitResult(BaseModel):
     """Rate limit consumption calculation for HTTP response headers."""
+
     limit: int
     remaining: int
     quota_remaining: int
@@ -62,9 +65,7 @@ async def get_api_key_metadata(
     # 2. Query PostgreSQL with eager loading of User and Subscription
     stmt = (
         select(ApiKey)
-        .options(
-            selectinload(ApiKey.user).selectinload(User.subscription)
-        )
+        .options(selectinload(ApiKey.user).selectinload(User.subscription))
         .where(ApiKey.key_hash == key_hash)
     )
     result = await db.execute(stmt)
