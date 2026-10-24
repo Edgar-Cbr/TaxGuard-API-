@@ -1,0 +1,127 @@
+"""Common FastAPI dependencies for dependency injection."""
+
+import uuid
+from typing import Annotated
+
+from fastapi import Depends, Header, Request, Response
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from redis.asyncio import Redis
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.core.exceptions import AuthenticationException
+from app.core.rate_limit import (
+    ApiKeyMetadata,
+    check_rate_limit_and_quota,
+    get_api_key_metadata,
+)
+from app.core.redis import get_redis_client
+from app.core.security import decode_access_token, hash_api_key
+from app.db.session import get_db
+from app.models.user import User
+
+__all__ = [
+    "get_current_user",
+    "get_db",
+    "get_redis",
+    "verify_api_key_and_quota",
+]
+
+security_bearer = HTTPBearer(auto_error=False)
+
+
+async def get_redis() -> Redis:
+    """Dependency for obtaining an async Redis client."""
+    return get_redis_client()
+
+
+async def get_current_user(
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(security_bearer)
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> User:
+    """Validate Bearer JWT and retrieve authenticated User from database."""
+    if credentials is None or not credentials.credentials:
+        raise AuthenticationException(
+            message="Missing or malformed Authorization header",
+            error_code="UNAUTHORIZED",
+        )
+
+    payload = decode_access_token(credentials.credentials)
+    user_id_raw: str | None = payload.get("sub")
+    if not user_id_raw:
+        raise AuthenticationException(
+            message="Token payload is missing subject claim",
+            error_code="INVALID_TOKEN",
+        )
+
+    try:
+        user_uuid = uuid.UUID(user_id_raw)
+    except (ValueError, TypeError) as exc:
+        raise AuthenticationException(
+            message="Invalid user identifier in token",
+            error_code="INVALID_TOKEN",
+        ) from exc
+
+    result = await db.execute(
+        select(User)
+        .options(selectinload(User.subscription))
+        .where(User.id == user_uuid)
+    )
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise AuthenticationException(
+            message="User not found",
+            error_code="USER_NOT_FOUND",
+        )
+
+    if not user.is_active:
+        raise AuthenticationException(
+            message="User account is deactivated",
+            error_code="ACCOUNT_INACTIVE",
+        )
+
+    return user
+
+
+async def verify_api_key_and_quota(
+    request: Request,
+    response: Response,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis_client: Annotated[Redis, Depends(get_redis)],
+    x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
+) -> ApiKeyMetadata:
+    """Validate API Key, check sliding-window rate limit, and track monthly quota."""
+    # 1. Extraer header X-API-Key. Si no existe, retornar 401 Unauthorized
+    if not x_api_key or not x_api_key.strip():
+        raise AuthenticationException(
+            message="Missing or empty X-API-Key header.",
+            error_code="MISSING_API_KEY",
+        )
+
+    # 2. Calcular SHA-256 y buscar metadatos en Redis / PostgreSQL
+    key_hash = hash_api_key(x_api_key)
+    metadata = await get_api_key_metadata(
+        key_hash=key_hash,
+        db=db,
+        redis_client=redis_client,
+    )
+
+    # 3. Verificar Rate Limit por segundo y cuota mensual en Redis
+    limit_result = await check_rate_limit_and_quota(
+        metadata=metadata,
+        redis_client=redis_client,
+    )
+
+    # 4. Inyectar encabezados en el objeto Response
+    response.headers["X-RateLimit-Limit"] = str(limit_result.limit)
+    response.headers["X-RateLimit-Remaining"] = str(limit_result.remaining)
+    response.headers["X-Quota-Remaining"] = str(limit_result.quota_remaining)
+
+    # Adjuntar metadatos al estado de la petición para auditoría y logs downstream
+    request.state.api_key_metadata = metadata
+
+    return metadata

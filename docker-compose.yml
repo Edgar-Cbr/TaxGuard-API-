@@ -1,0 +1,79 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: taxguard_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - DATABASE_URL=postgresql+asyncpg://taxguard:taxguard_secret@db:5432/taxguard_db
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=super_secret_taxguard_key_for_development_purposes_only_replace_in_prod
+      - CORS_ORIGINS=*
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - taxguard_network
+
+  db:
+    image: postgres:16-alpine
+    container_name: taxguard_postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: taxguard
+      POSTGRES_PASSWORD: taxguard_secret
+      POSTGRES_DB: taxguard_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taxguard -d taxguard_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - taxguard_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: taxguard_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - taxguard_network
+
+volumes:
+  postgres_data:
+    name: taxguard_postgres_data
+  redis_data:
+    name: taxguard_redis_data
+
+networks:
+  taxguard_network:
+    name: taxguard_network
+    driver: bridge
