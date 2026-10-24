@@ -1,0 +1,110 @@
+{
+  "06000": {
+    "country_code": "MX",
+    "postal_code": "06000",
+    "state": "Ciudad de México",
+    "state_code": "CMX",
+    "municipality": "Cuauhtémoc",
+    "city": "Ciudad de México",
+    "settlements": ["Centro (Área 1)"]
+  },
+  "06600": {
+    "country_code": "MX",
+    "postal_code": "06600",
+    "state": "Ciudad de México",
+    "state_code": "CMX",
+    "municipality": "Cuauhtémoc",
+    "city": "Ciudad de México",
+    "settlements": ["Juárez"]
+  },
+  "11560": {
+    "country_code": "MX",
+    "postal_code": "11560",
+    "state": "Ciudad de México",
+    "state_code": "CMX",
+    "municipality": "Miguel Hidalgo",
+    "city": "Ciudad de México",
+    "settlements": ["Polanco I Sección", "Polanco II Sección"]
+  },
+  "01210": {
+    "country_code": "MX",
+    "postal_code": "01210",
+    "state": "Ciudad de México",
+    "state_code": "CMX",
+    "municipality": "Álvaro Obregón",
+    "city": "Ciudad de México",
+    "settlements": ["Santa Fe", "Zedec Santa Fe"]
+  },
+  "44100": {
+    "country_code": "MX",
+    "postal_code": "44100",
+    "state": "Jalisco",
+    "state_code": "JAL",
+    "municipality": "Guadalajara",
+    "city": "Guadalajara",
+    "settlements": ["Guadalajara Centro", "Barranquitas"]
+  },
+  "45050": {
+    "country_code": "MX",
+    "postal_code": "45050",
+    "state": "Jalisco",
+    "state_code": "JAL",
+    "municipality": "Zapopan",
+    "city": "Zapopan",
+    "settlements": ["Ciudad Granja", "Puerta de Hierro"]
+  },
+  "64000": {
+    "country_code": "MX",
+    "postal_code": "64000",
+    "state": "Nuevo León",
+    "state_code": "NLE",
+    "municipality": "Monterrey",
+    "city": "Monterrey",
+    "settlements": ["Monterrey Centro"]
+  },
+  "66220": {
+    "country_code": "MX",
+    "postal_code": "66220",
+    "state": "Nuevo León",
+    "state_code": "NLE",
+    "municipality": "San Pedro Garza García",
+    "city": "San Pedro Garza García",
+    "settlements": ["Del Valle", "San Pedro"]
+  },
+  "72000": {
+    "country_code": "MX",
+    "postal_code": "72000",
+    "state": "Puebla",
+    "state_code": "PUE",
+    "municipality": "Puebla",
+    "city": "Puebla",
+    "settlements": ["Puebla Centro", "El Carmen"]
+  },
+  "76000": {
+    "country_code": "MX",
+    "postal_code": "76000",
+    "state": "Querétaro",
+    "state_code": "QUE",
+    "municipality": "Querétaro",
+    "city": "Santiago de Querétaro",
+    "settlements": ["Querétaro Centro"]
+  },
+  "77500": {
+    "country_code": "MX",
+    "postal_code": "77500",
+    "state": "Quintana Roo",
+    "state_code": "ROO",
+    "municipality": "Benito Juárez",
+    "city": "Cancún",
+    "settlements": ["Cancún Centro", "Supermanzana 1"]
+  },
+  "97000": {
+    "country_code": "MX",
+    "postal_code": "97000",
+    "state": "Yucatán",
+    "state_code": "YUC",
+    "municipality": "Mérida",
+    "city": "Mérida",
+    "settlements": ["Mérida Centro"]
+  }
+}
