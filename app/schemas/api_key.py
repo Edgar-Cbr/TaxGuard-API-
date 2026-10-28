@@ -5,6 +5,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.user import UserTier
+
 
 class ApiKeyCreateRequest(BaseModel):
     """Payload to request the creation of a new API key."""
@@ -49,6 +51,19 @@ class ApiKeyRevokeResponse(BaseModel):
 
     message: str = "API Key successfully revoked."
     revoked_key_id: uuid.UUID
+
+
+class ApiKeyVerifyResponse(BaseModel):
+    """Introspection response for an active API Key."""
+
+    valid: bool = Field(
+        default=True, description="True if the API key is active and valid"
+    )
+    api_key_id: uuid.UUID
+    user_id: uuid.UUID
+    tier: UserTier
+    monthly_quota: int
+    rate_limit_per_sec: int
 
 
 class UserUsageStatsResponse(BaseModel):

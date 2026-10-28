@@ -3,8 +3,12 @@
 import uuid
 from typing import Annotated
 
-from fastapi import Depends, Header, Request, Response
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Depends, Request, Response, Security
+from fastapi.security import (
+    APIKeyHeader,
+    HTTPAuthorizationCredentials,
+    HTTPBearer,
+)
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,13 +26,25 @@ from app.db.session import get_db
 from app.models.user import User
 
 __all__ = [
+    "api_key_header_scheme",
     "get_current_user",
     "get_db",
     "get_redis",
     "verify_api_key_and_quota",
 ]
 
-security_bearer = HTTPBearer(auto_error=False)
+security_bearer = HTTPBearer(
+    scheme_name="HTTPBearer",
+    description="JWT Access Token obtained from `/api/v1/auth/login`",
+    auto_error=False,
+)
+
+api_key_header_scheme = APIKeyHeader(
+    name="X-API-Key",
+    scheme_name="APIKeyHeader",
+    description="Production API Key formatted as `tg_live_<32_hex_chars>`",
+    auto_error=False,
+)
 
 
 async def get_redis() -> Redis:
@@ -38,7 +54,7 @@ async def get_redis() -> Redis:
 
 async def get_current_user(
     credentials: Annotated[
-        HTTPAuthorizationCredentials | None, Depends(security_bearer)
+        HTTPAuthorizationCredentials | None, Security(security_bearer)
     ],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
@@ -92,7 +108,7 @@ async def verify_api_key_and_quota(
     response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     redis_client: Annotated[Redis, Depends(get_redis)],
-    x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
+    x_api_key: Annotated[str | None, Security(api_key_header_scheme)] = None,
 ) -> ApiKeyMetadata:
     """Validate API Key, check sliding-window rate limit, and track monthly quota."""
     # 1. Extraer header X-API-Key. Si no existe, retornar 401 Unauthorized
