@@ -118,24 +118,26 @@ async def check_rate_limit_and_quota(
     rate_key = f"ratelimit:{metadata.api_key_id}:{epoch_second}"
     quota_key = f"quota:{metadata.user_id}:{year_month}"
 
-    # Atomic pipeline execution
-    pipe = redis_client.pipeline(transaction=True)
-    pipe.incr(rate_key)
-    pipe.expire(rate_key, 2)  # 2 second TTL ensures clean sliding transition
-    pipe.incr(quota_key)
-    pipe.expire(quota_key, 35 * 86400)  # 35 days TTL covers month rollover
+    # 1. Check per-second rate limit first so rejected 429 requests do not consume monthly quota
+    rate_pipe = redis_client.pipeline(transaction=True)
+    rate_pipe.incr(rate_key)
+    rate_pipe.expire(rate_key, 2)  # 2 second TTL ensures clean sliding transition
+    rate_results = await rate_pipe.execute()
+    rate_count = int(rate_results[0])
 
-    results = await pipe.execute()
-    rate_count = int(results[0])
-    quota_count = int(results[2])
-
-    # Enforce Rate Limit per second
     if rate_count > metadata.rate_limit_per_sec:
         raise RateLimitExceededException(
             message=f"Rate limit of {metadata.rate_limit_per_sec} requests per second exceeded.",
             retry_after=1,
             error_code="RATE_LIMIT_EXCEEDED",
         )
+
+    # 2. Check and increment monthly quota only for non-rate-limited requests
+    quota_pipe = redis_client.pipeline(transaction=True)
+    quota_pipe.incr(quota_key)
+    quota_pipe.expire(quota_key, 35 * 86400)  # 35 days TTL covers month rollover
+    quota_results = await quota_pipe.execute()
+    quota_count = int(quota_results[0])
 
     # Enforce Monthly Quota
     if quota_count > metadata.monthly_quota:
