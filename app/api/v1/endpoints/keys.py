@@ -27,6 +27,7 @@ from app.schemas.api_key import (
     ApiKeyCreateRequest,
     ApiKeyResponse,
     ApiKeyRevokeResponse,
+    ApiKeyVerifyResponse,
     UserUsageStatsResponse,
 )
 from app.services.usage_tracker import record_usage_log
@@ -134,13 +135,14 @@ async def revoke_api_key(
 
 @router.get(
     "/verify",
+    response_model=ApiKeyVerifyResponse,
     summary="Verify X-API-Key status, active rate limits and remaining quota",
 )
 async def verify_key(
     metadata: Annotated[ApiKeyMetadata, Depends(verify_api_key_and_quota)],
     background_tasks: BackgroundTasks,
     request: Request,
-) -> dict:
+) -> ApiKeyVerifyResponse:
     """Introspection endpoint to test and verify X-API-Key validity and quota."""
     start_time = time.perf_counter()
     latency_ms = (time.perf_counter() - start_time) * 1000
@@ -151,14 +153,14 @@ async def verify_key(
         status_code=200,
         latency_ms=latency_ms,
     )
-    return {
-        "valid": True,
-        "api_key_id": metadata.api_key_id,
-        "user_id": metadata.user_id,
-        "tier": metadata.tier,
-        "monthly_quota": metadata.monthly_quota,
-        "rate_limit_per_sec": metadata.rate_limit_per_sec,
-    }
+    return ApiKeyVerifyResponse(
+        valid=True,
+        api_key_id=metadata.api_key_id,
+        user_id=metadata.user_id,
+        tier=metadata.tier,
+        monthly_quota=metadata.monthly_quota,
+        rate_limit_per_sec=metadata.rate_limit_per_sec,
+    )
 
 
 @router.get(

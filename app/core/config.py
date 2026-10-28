@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # Application Information
     PROJECT_NAME: str = "TaxGuard API"
-    VERSION: str = "0.1.0"
+    VERSION: str = "1.1.0"
     ENVIRONMENT: Literal["development", "staging", "production", "testing"] = (
         "development"
     )

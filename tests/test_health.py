@@ -8,14 +8,59 @@ from app.core.config import settings
 
 @pytest.mark.asyncio
 async def test_root_endpoint(async_client: AsyncClient):
-    """Test root endpoint returns application metadata."""
+    """Test root endpoint returns application metadata and all discovery links."""
     response = await async_client.get("/")
     assert response.status_code == 200
     data = response.json()
     assert data["name"] == settings.PROJECT_NAME
     assert data["version"] == settings.VERSION
-    assert "health" in data
-    assert "documentation" in data
+    assert data["documentation"] == "/docs"
+    assert data["redoc"] == "/redoc"
+    assert data["openapi"] == "/api/v1/openapi.json"
+    assert data["health"] == "/health"
+
+
+@pytest.mark.asyncio
+async def test_openapi_security_schemes_and_deduplicated_health(
+    async_client: AsyncClient,
+):
+    """Test OpenAPI spec registers APIKeyHeader & HTTPBearer and avoids duplicate /health."""
+    res = await async_client.get("/api/v1/openapi.json")
+    assert res.status_code == 200
+    spec = res.json()
+    schemes = spec["components"]["securitySchemes"]
+    assert "HTTPBearer" in schemes
+    assert "APIKeyHeader" in schemes
+    assert schemes["APIKeyHeader"]["name"] == "X-API-Key"
+    assert "StripeWebhookSignature" in schemes
+
+    # Verify /health is documented with 200 and 503 responses and /api/v1/health is hidden from schema
+    assert "/health" in spec["paths"]
+    assert "/api/v1/health" not in spec["paths"]
+    health_responses = spec["paths"]["/health"]["get"]["responses"]
+    assert "200" in health_responses
+    assert "503" in health_responses
+
+
+@pytest.mark.asyncio
+async def test_cors_exposes_rate_limit_and_request_id_headers(
+    async_client: AsyncClient,
+):
+    """Test CORSMiddleware exposes X-RateLimit-*, X-Quota-Remaining, X-Request-ID, and Retry-After."""
+    res = await async_client.get(
+        "/",
+        headers={"Origin": "http://localhost:3000"},
+    )
+    assert res.status_code == 200
+    exposed = res.headers.get("access-control-expose-headers", "")
+    for expected_header in (
+        "X-Request-ID",
+        "X-RateLimit-Limit",
+        "X-RateLimit-Remaining",
+        "X-Quota-Remaining",
+        "Retry-After",
+    ):
+        assert expected_header in exposed
 
 
 @pytest.mark.asyncio

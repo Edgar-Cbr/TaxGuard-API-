@@ -3,7 +3,9 @@
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, Request, status
+from fastapi import APIRouter, Depends, Request, Security, status
+from fastapi.security import APIKeyHeader
+from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,9 +22,38 @@ from app.models.user import Subscription, User, UserTier
 
 router = APIRouter()
 
+stripe_signature_scheme = APIKeyHeader(
+    name="Stripe-Signature",
+    scheme_name="StripeWebhookSignature",
+    description="HMAC-SHA256 Stripe webhook signature (`t=<timestamp>,v1=<hmac>` or hex digest)",
+    auto_error=False,
+)
+
+
+class StripeWebhookResponse(BaseModel):
+    """Response model for Stripe webhook event processing."""
+
+    status: str = Field(description="Processing outcome: 'success' or 'ignored'")
+    event: str | None = Field(default=None, description="Processed Stripe event type")
+    message: str | None = Field(
+        default=None, description="Informational status message"
+    )
+    user_id: str | None = Field(default=None, description="Upgraded user UUID")
+    tier: str | None = Field(default=None, description="Updated subscription tier")
+    monthly_quota: int | None = Field(
+        default=None, description="New monthly request quota"
+    )
+    rate_limit_per_sec: int | None = Field(
+        default=None, description="New per-second rate limit"
+    )
+    invalidated_keys_count: int | None = Field(
+        default=None, description="Number of Redis cached API keys invalidated"
+    )
+
 
 @router.post(
     "/webhook",
+    response_model=StripeWebhookResponse,
     status_code=status.HTTP_200_OK,
     summary="Process signed Stripe checkout.session.completed webhook for plan upgrades",
 )
@@ -31,8 +62,8 @@ async def stripe_webhook(
     payload: dict[str, Any],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis_client: Annotated[Redis, Depends(get_redis)],
-    stripe_signature: Annotated[str | None, Header(alias="Stripe-Signature")] = None,
-) -> dict[str, Any]:
+    stripe_signature: Annotated[str | None, Security(stripe_signature_scheme)] = None,
+) -> StripeWebhookResponse:
     """Process incoming Stripe webhook events.
 
     Verifies the cryptographic HMAC-SHA256 'Stripe-Signature' header, and on
@@ -50,10 +81,11 @@ async def stripe_webhook(
     event_type = payload.get("type")
 
     if event_type != "checkout.session.completed":
-        return {
-            "status": "ignored",
-            "message": f"Event type '{event_type}' not processed.",
-        }
+        return StripeWebhookResponse(
+            status="ignored",
+            event=str(event_type) if event_type else None,
+            message=f"Event type '{event_type}' not processed.",
+        )
 
     raw_data = payload.get("data")
     data_dict = raw_data if isinstance(raw_data, dict) else {}
@@ -129,12 +161,12 @@ async def stripe_webhook(
         except Exception:
             pass
 
-    return {
-        "status": "success",
-        "event": "checkout.session.completed",
-        "user_id": str(user.id),
-        "tier": UserTier.PRO.value,
-        "monthly_quota": 50000,
-        "rate_limit_per_sec": 50,
-        "invalidated_keys_count": invalidated_count,
-    }
+    return StripeWebhookResponse(
+        status="success",
+        event="checkout.session.completed",
+        user_id=str(user.id),
+        tier=UserTier.PRO.value,
+        monthly_quota=50000,
+        rate_limit_per_sec=50,
+        invalidated_keys_count=invalidated_count,
+    )
