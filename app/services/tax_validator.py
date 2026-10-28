@@ -5,9 +5,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 # SAT Official character-to-value mapping (Anexo 20)
+# 0-9 -> 0-9, A-N -> 10-23, & -> 24, O-Z -> 25-36, space -> 37, Ñ -> 38
 CHAR_VALUES: dict[str, int] = {str(i): i for i in range(10)}
-CHAR_VALUES.update({chr(ord("A") + i): i + 10 for i in range(26)})
+CHAR_VALUES.update({ch: idx for idx, ch in enumerate("ABCDEFGHIJKLMN", start=10)})
 CHAR_VALUES["&"] = 24
+CHAR_VALUES.update({ch: idx for idx, ch in enumerate("OPQRSTUVWXYZ", start=25)})
 CHAR_VALUES[" "] = 37
 CHAR_VALUES["Ñ"] = 38
 
@@ -77,7 +79,8 @@ def validate_calendar_date(date_str: str) -> tuple[bool, str | None, str | None]
         mm = int(date_str[2:4])
         dd = int(date_str[4:6])
 
-        current_year = datetime.now(UTC).year
+        now_utc = datetime.now(UTC)
+        current_year = now_utc.year
         current_century = (current_year // 100) * 100
         cutoff_yy = current_year % 100
 
@@ -86,6 +89,14 @@ def validate_calendar_date(date_str: str) -> tuple[bool, str | None, str | None]
 
         parsed_date = datetime(year=year, month=mm, day=dd)
         formatted_date = parsed_date.strftime("%Y-%m-%d")
+
+        if parsed_date.date() > now_utc.date():
+            return (
+                False,
+                None,
+                f"Invalid calendar date '{date_str}': registration date {formatted_date} cannot be in the future.",
+            )
+
         return True, formatted_date, None
     except ValueError as exc:
         return False, None, f"Invalid calendar date '{date_str}': {exc}"
