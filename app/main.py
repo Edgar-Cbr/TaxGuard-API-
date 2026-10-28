@@ -1,11 +1,13 @@
 import logging
 import uuid
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from app.api.v1.router import api_router
 from app.core.config import settings
@@ -22,6 +24,43 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("taxguard.main")
+
+
+class RootInfoResponse(BaseModel):
+    """Root API metadata and documentation discovery links."""
+
+    name: str = Field(examples=["TaxGuard API"])
+    version: str = Field(examples=["1.1.0"])
+    environment: str = Field(examples=["development"])
+    documentation: str = Field(examples=["/docs"])
+    redoc: str = Field(examples=["/redoc"])
+    openapi: str = Field(examples=["/api/v1/openapi.json"])
+    health: str = Field(examples=["/health"])
+
+
+class ServiceHealthDetail(BaseModel):
+    """Individual backing service connectivity status."""
+
+    status: str = Field(examples=["healthy"])
+    available: bool = Field(examples=[True])
+    latency_ms: float | None = Field(default=None, examples=[1.85])
+    error: str | None = Field(default=None)
+
+
+class HealthServicesMap(BaseModel):
+    """Map of backing infrastructure dependencies."""
+
+    database: ServiceHealthDetail
+    redis: ServiceHealthDetail
+
+
+class HealthCheckResponse(BaseModel):
+    """System healthcheck payload."""
+
+    status: str = Field(examples=["healthy"])
+    version: str = Field(examples=["1.1.0"])
+    environment: str = Field(examples=["development"])
+    services: HealthServicesMap
 
 
 @asynccontextmanager
@@ -73,13 +112,20 @@ def create_application() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS Middleware
+    # CORS Middleware with exposed rate-limiting & tracing headers for browser clients
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=[
+            "X-Request-ID",
+            "X-RateLimit-Limit",
+            "X-RateLimit-Remaining",
+            "X-Quota-Remaining",
+            "Retry-After",
+        ],
     )
 
     # Request ID and Request Logging Middleware
@@ -150,20 +196,42 @@ def create_application() -> FastAPI:
     application.include_router(api_router, prefix=settings.API_V1_STR)
 
     # Root / Info Endpoint
-    @application.get("/", tags=["system"])
-    async def root():
-        return {
-            "name": settings.PROJECT_NAME,
-            "version": settings.VERSION,
-            "environment": settings.ENVIRONMENT,
-            "documentation": "/docs",
-            "health": "/health",
-        }
+    @application.get(
+        "/",
+        response_model=RootInfoResponse,
+        tags=["system"],
+        summary="Get API metadata and discovery links",
+    )
+    async def root() -> RootInfoResponse:
+        return RootInfoResponse(
+            name=settings.PROJECT_NAME,
+            version=settings.VERSION,
+            environment=settings.ENVIRONMENT,
+            documentation="/docs",
+            redoc="/redoc",
+            openapi=f"{settings.API_V1_STR}/openapi.json",
+            health="/health",
+        )
 
     # Healthcheck Endpoint
-    @application.get("/health", tags=["system"])
-    @application.get(f"{settings.API_V1_STR}/health", tags=["system"])
-    async def health_check():
+    @application.get(
+        "/health",
+        response_model=HealthCheckResponse,
+        tags=["system"],
+        summary="Check database and Redis connectivity health",
+        responses={
+            503: {
+                "model": HealthCheckResponse,
+                "description": "One or more backing services are degraded or unavailable",
+            }
+        },
+    )
+    @application.get(
+        f"{settings.API_V1_STR}/health",
+        response_model=HealthCheckResponse,
+        include_in_schema=False,
+    )
+    async def health_check() -> Any:
         db_status = await check_db_health()
         redis_status = await check_redis_health()
 
@@ -180,7 +248,6 @@ def create_application() -> FastAPI:
             },
         }
 
-        # Return 200 in development/testing or degraded, but indicate accurate service status
         return JSONResponse(
             status_code=status.HTTP_200_OK
             if is_healthy
