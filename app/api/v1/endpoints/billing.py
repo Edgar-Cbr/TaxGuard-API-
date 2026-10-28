@@ -3,14 +3,19 @@
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Header, Request, status
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_db, get_redis
-from app.core.exceptions import AppException, EntityNotFoundException
+from app.core.exceptions import (
+    AppException,
+    AuthenticationException,
+    EntityNotFoundException,
+)
+from app.core.security import verify_stripe_signature
 from app.models.user import Subscription, User, UserTier
 
 router = APIRouter()
@@ -19,19 +24,29 @@ router = APIRouter()
 @router.post(
     "/webhook",
     status_code=status.HTTP_200_OK,
-    summary="Simulate Stripe checkout.session.completed webhook for plan upgrades",
+    summary="Process signed Stripe checkout.session.completed webhook for plan upgrades",
 )
 async def stripe_webhook(
+    request: Request,
     payload: dict[str, Any],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis_client: Annotated[Redis, Depends(get_redis)],
+    stripe_signature: Annotated[str | None, Header(alias="Stripe-Signature")] = None,
 ) -> dict[str, Any]:
     """Process incoming Stripe webhook events.
 
-    On 'checkout.session.completed', upgrades the user to PRO tier
+    Verifies the cryptographic HMAC-SHA256 'Stripe-Signature' header, and on
+    'checkout.session.completed', upgrades the user to PRO tier
     (50,000 monthly quota and 50 req/sec rate limit) and invalidates
     cached API key metadata in Redis.
     """
+    raw_body = await request.body()
+    if not verify_stripe_signature(raw_body, stripe_signature):
+        raise AuthenticationException(
+            message="Missing or invalid Stripe-Signature header.",
+            error_code="INVALID_WEBHOOK_SIGNATURE",
+        )
+
     event_type = payload.get("type")
 
     if event_type != "checkout.session.completed":
@@ -40,9 +55,18 @@ async def stripe_webhook(
             "message": f"Event type '{event_type}' not processed.",
         }
 
-    data_object = payload.get("data", {}).get("object", {})
+    raw_data = payload.get("data")
+    data_dict = raw_data if isinstance(raw_data, dict) else {}
+    raw_obj = data_dict.get("object")
+    data_object = raw_obj if isinstance(raw_obj, dict) else {}
+
     client_ref_id = data_object.get("client_reference_id")
-    customer_email = data_object.get("customer_email")
+    raw_email = data_object.get("customer_email")
+    customer_email = (
+        str(raw_email).strip().lower()
+        if isinstance(raw_email, str) and raw_email.strip()
+        else None
+    )
     stripe_customer_id = data_object.get("customer")
 
     if not client_ref_id and not customer_email:

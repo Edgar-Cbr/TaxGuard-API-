@@ -49,8 +49,8 @@ def test_rfc_persona_moral_valid():
 
 
 def test_rfc_persona_fisica_valid():
-    """Verify valid Persona Física RFC (13 chars) with official Modulo 11 check."""
-    result = validate_rfc("GODE561231GR0")
+    """Verify valid Persona Física RFC (13 chars) with official SAT Modulo 11 check (including O-Z weights)."""
+    result = validate_rfc("GODE561231GR8")
     assert result.valid is True
     assert result.entity_type == "INDIVIDUAL"
     assert result.registration_date == "1956-12-31"
@@ -74,9 +74,17 @@ def test_rfc_impossible_calendar_date():
     assert any("calendar date" in err.lower() for err in result.errors)
 
 
+def test_rfc_future_calendar_date_rejected():
+    """Verify rejection of a registration date in the future within the current year."""
+    result = validate_rfc("BAAA261231AAA")
+    assert result.valid is False
+    assert result.registration_date is None
+    assert any("future" in err.lower() for err in result.errors)
+
+
 def test_rfc_checksum_mismatch():
     """Verify rejection when verification digit (homoclave checksum) is wrong."""
-    # Last char should be 0, given 9
+    # Last char should be 8, given 9
     result = validate_rfc("GODE561231GR9")
     assert result.valid is False
     assert result.checksum_valid is False

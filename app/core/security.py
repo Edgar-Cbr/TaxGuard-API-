@@ -1,7 +1,9 @@
-"""Security utilities: Bcrypt password hashing, JWT creation/decoding, and API Key cryptography."""
+"""Security utilities: Bcrypt password hashing, JWT creation/decoding, API Key & Webhook cryptography."""
 
 import hashlib
+import hmac
 import secrets
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -13,16 +15,18 @@ from app.core.exceptions import AuthenticationException
 
 
 def get_password_hash(password: str) -> str:
-    """Hash plaintext password with bcrypt."""
+    """Hash plaintext password with bcrypt (safely bounded to 72 UTF-8 bytes)."""
     salt = bcrypt.gensalt()
-    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+    pwd_bytes = password.encode("utf-8")[:72]
+    return bcrypt.hashpw(pwd_bytes, salt).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify plaintext password against stored bcrypt hash."""
     try:
+        pwd_bytes = plain_password.encode("utf-8")[:72]
         return bcrypt.checkpw(
-            plain_password.encode("utf-8"),
+            pwd_bytes,
             hashed_password.encode("utf-8"),
         )
     except Exception:
@@ -84,3 +88,56 @@ def generate_api_key() -> tuple[str, str, str]:
 def hash_api_key(raw_key: str) -> str:
     """Calculate SHA-256 digest of an API key for safe database storage and lookup."""
     return hashlib.sha256(raw_key.strip().encode("utf-8")).hexdigest()
+
+
+def generate_stripe_signature(
+    payload_bytes: bytes,
+    secret: str | None = None,
+    timestamp: int | None = None,
+) -> str:
+    """Generate an HMAC-SHA256 Stripe-Signature header (`t=<ts>,v1=<hex>`)."""
+    webhook_secret = secret or settings.STRIPE_WEBHOOK_SECRET
+    ts = timestamp if timestamp is not None else int(time.time())
+    signed_payload = f"{ts}.".encode() + payload_bytes
+    digest = hmac.new(
+        webhook_secret.encode("utf-8"),
+        signed_payload,
+        hashlib.sha256,
+    ).hexdigest()
+    return f"t={ts},v1={digest}"
+
+
+def verify_stripe_signature(
+    payload_bytes: bytes,
+    sig_header: str | None,
+    secret: str | None = None,
+) -> bool:
+    """Verify HMAC-SHA256 Stripe-Signature header (`t=<ts>,v1=<sig>` or raw hex digest)."""
+    if not sig_header or not sig_header.strip():
+        return False
+
+    webhook_secret = secret or settings.STRIPE_WEBHOOK_SECRET
+    header = sig_header.strip()
+
+    # Support standard Stripe format: t=<timestamp>,v1=<signature>
+    if "v1=" in header and "t=" in header:
+        parts = dict(item.split("=", 1) for item in header.split(",") if "=" in item)
+        ts_str = parts.get("t", "")
+        v1_sig = parts.get("v1", "")
+        if not ts_str or not v1_sig:
+            return False
+        signed_payload = f"{ts_str}.".encode() + payload_bytes
+        expected = hmac.new(
+            webhook_secret.encode("utf-8"),
+            signed_payload,
+            hashlib.sha256,
+        ).hexdigest()
+        return hmac.compare_digest(expected, v1_sig)
+
+    # Also support direct HMAC-SHA256 hex digest over raw payload bytes
+    expected_raw = hmac.new(
+        webhook_secret.encode("utf-8"),
+        payload_bytes,
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(expected_raw, header)

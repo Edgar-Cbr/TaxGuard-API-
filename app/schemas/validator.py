@@ -11,7 +11,7 @@ class TaxIdValidationRequest(BaseModel):
         min_length=1,
         max_length=20,
         description="Mexican RFC or international TIN",
-        examples=["BBA830831LJ2", "GODE561231GR0"],
+        examples=["BBA830831LJ2", "GODE561231GR8"],
     )
 
 

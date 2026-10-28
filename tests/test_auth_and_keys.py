@@ -73,7 +73,7 @@ async def test_user_registration_flow(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_registration_duplicate_email_rejected(async_client: AsyncClient):
-    """Test registering the same email twice returns 400 Bad Request."""
+    """Test registering the same email twice (even with different casing) returns 400 Bad Request."""
     payload = {
         "email": "duplicate@fintech.io",
         "password": "StrongPassword2026!",
@@ -81,24 +81,40 @@ async def test_registration_duplicate_email_rejected(async_client: AsyncClient):
     res1 = await async_client.post("/api/v1/auth/register", json=payload)
     assert res1.status_code == 201
 
-    res2 = await async_client.post("/api/v1/auth/register", json=payload)
+    res2 = await async_client.post(
+        "/api/v1/auth/register",
+        json={"email": "DUPLICATE@FINTECH.IO", "password": "StrongPassword2026!"},
+    )
     assert res2.status_code == 400
     assert res2.json()["error_code"] == "EMAIL_ALREADY_EXISTS"
 
 
 @pytest.mark.asyncio
+async def test_registration_password_exceeding_72_chars_returns_422(
+    async_client: AsyncClient,
+):
+    """Test password > 72 chars is cleanly rejected with 422 instead of 500 Bcrypt error."""
+    res = await async_client.post(
+        "/api/v1/auth/register",
+        json={"email": "longpwd@fintech.io", "password": "A" * 80},
+    )
+    assert res.status_code == 422
+    assert res.json()["error_code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
 async def test_user_login_success_and_failure(async_client: AsyncClient):
-    """Test login succeeds with correct credentials and fails with wrong password."""
+    """Test login succeeds with correct credentials (case-insensitive email) and fails with wrong password."""
     # Register first
     await async_client.post(
         "/api/v1/auth/register",
         json={"email": "login_test@fintech.io", "password": "Password123!"},
     )
 
-    # Valid Login
+    # Valid Login (including uppercase email)
     login_res = await async_client.post(
         "/api/v1/auth/login",
-        json={"email": "login_test@fintech.io", "password": "Password123!"},
+        json={"email": "LOGIN_TEST@FINTECH.IO", "password": "Password123!"},
     )
     assert login_res.status_code == 200
     token_data = login_res.json()

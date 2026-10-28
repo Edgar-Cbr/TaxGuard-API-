@@ -37,7 +37,7 @@ def upgrade() -> None:
         sa.Column("hashed_password", sa.String(length=255), nullable=False),
         sa.Column(
             "tier",
-            sa.Enum("FREE", "PRO", "ENTERPRISE", name="user_tier_enum"),
+            user_tier_enum,
             nullable=False,
             server_default="FREE",
         ),

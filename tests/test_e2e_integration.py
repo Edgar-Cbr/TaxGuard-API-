@@ -11,6 +11,7 @@ Flow:
 8. API Key revocation and subsequent request rejection (401)
 """
 
+import json
 import uuid
 from unittest.mock import patch
 
@@ -19,6 +20,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import generate_stripe_signature
 from app.models.api_key import ApiKey
 from app.models.user import User, UserTier
 from app.services import usage_tracker
@@ -143,7 +145,7 @@ async def test_full_b2b_saas_lifecycle_e2e(
         assert stats_data["quota_remaining"] == 997
 
         # --------------------------------------------------------------------------
-        # Step 7: Simulate Stripe Webhook Upgrade to PRO
+        # Step 7: Simulate Signed Stripe Webhook Upgrade to PRO
         # --------------------------------------------------------------------------
         stripe_payload = {
             "id": "evt_live_simulated_9988",
@@ -157,10 +159,16 @@ async def test_full_b2b_saas_lifecycle_e2e(
                 }
             },
         }
+        raw_stripe_bytes = json.dumps(stripe_payload).encode("utf-8")
+        stripe_sig = generate_stripe_signature(raw_stripe_bytes)
 
         upgrade_res = await async_client.post(
             "/api/v1/billing/webhook",
-            json=stripe_payload,
+            content=raw_stripe_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "Stripe-Signature": stripe_sig,
+            },
         )
         assert upgrade_res.status_code == 200
         upgrade_data = upgrade_res.json()

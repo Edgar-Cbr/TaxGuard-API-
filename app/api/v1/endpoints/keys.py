@@ -1,10 +1,11 @@
 """API Key management endpoints: creation, listing, and revocation."""
 
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
 from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,7 @@ from app.schemas.api_key import (
     ApiKeyRevokeResponse,
     UserUsageStatsResponse,
 )
+from app.services.usage_tracker import record_usage_log
 
 router = APIRouter()
 
@@ -136,8 +138,19 @@ async def revoke_api_key(
 )
 async def verify_key(
     metadata: Annotated[ApiKeyMetadata, Depends(verify_api_key_and_quota)],
+    background_tasks: BackgroundTasks,
+    request: Request,
 ) -> dict:
     """Introspection endpoint to test and verify X-API-Key validity and quota."""
+    start_time = time.perf_counter()
+    latency_ms = (time.perf_counter() - start_time) * 1000
+    background_tasks.add_task(
+        record_usage_log,
+        api_key_id=metadata.api_key_id,
+        endpoint=request.url.path,
+        status_code=200,
+        latency_ms=latency_ms,
+    )
     return {
         "valid": True,
         "api_key_id": metadata.api_key_id,
@@ -156,40 +169,61 @@ async def verify_key(
 async def get_user_usage_stats(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    redis_client: Annotated[Redis, Depends(get_redis)],
 ) -> UserUsageStatsResponse:
     """Return aggregated consumption statistics, status codes breakdown, and average latency."""
-    # 1. Total calls and average latency across all user keys
+    now = datetime.now(UTC)
+    start_of_month = datetime(now.year, now.month, 1, tzinfo=UTC)
+
+    # 1. Total calls and average latency across all user keys in the current calendar month
     stats_stmt = (
         select(
             func.count(UsageLog.id).label("total"),
             func.coalesce(func.avg(UsageLog.latency_ms), 0.0).label("avg_lat"),
         )
         .join(ApiKey, UsageLog.api_key_id == ApiKey.id)
-        .where(ApiKey.user_id == current_user.id)
+        .where(
+            ApiKey.user_id == current_user.id,
+            UsageLog.created_at >= start_of_month,
+        )
     )
     stats_res = await db.execute(stats_stmt)
     total_calls, avg_latency = stats_res.one()
 
-    # 2. Status code breakdown
+    # 2. Status code breakdown for current calendar month
     codes_stmt = (
         select(
             UsageLog.status_code,
             func.count(UsageLog.id).label("count"),
         )
         .join(ApiKey, UsageLog.api_key_id == ApiKey.id)
-        .where(ApiKey.user_id == current_user.id)
+        .where(
+            ApiKey.user_id == current_user.id,
+            UsageLog.created_at >= start_of_month,
+        )
         .group_by(UsageLog.status_code)
     )
     codes_res = await db.execute(codes_stmt)
     status_codes = {str(code): count for code, count in codes_res.all()}
 
-    # Quota calculations
+    # 3. Synchronize quota consumption with Redis monthly counter
+    year_month = now.strftime("%Y-%m")
+    quota_key = f"quota:{current_user.id}:{year_month}"
+    redis_consumed = 0
+    try:
+        raw_quota = await redis_client.get(quota_key)
+        if raw_quota is not None:
+            redis_consumed = int(raw_quota)
+    except Exception:
+        pass
+
     sub = current_user.subscription
     monthly_quota = sub.monthly_quota if sub else 1000
-    quota_remaining = max(0, monthly_quota - total_calls)
+    effective_used = max(int(total_calls), redis_consumed)
+    quota_remaining = max(0, monthly_quota - effective_used)
 
     return UserUsageStatsResponse(
-        total_calls=total_calls,
+        total_calls=effective_used,
         avg_latency_ms=round(float(avg_latency), 2),
         status_codes=status_codes,
         monthly_quota=monthly_quota,
