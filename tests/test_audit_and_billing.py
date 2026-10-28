@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import UTC, datetime
 
@@ -6,12 +7,24 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import hash_api_key
+from app.core.security import generate_stripe_signature, hash_api_key
 from app.models.api_key import ApiKey
 from app.models.usage_log import UsageLog
 from app.models.user import User, UserTier
 from app.services.usage_tracker import record_usage_log
 from tests.conftest import MockRedis, TestingSessionLocal
+
+
+def _signed_webhook_post_args(payload: dict) -> tuple[bytes, dict[str, str]]:
+    """Serialize payload and generate valid Stripe-Signature header."""
+    raw_bytes = json.dumps(payload).encode("utf-8")
+    sig = generate_stripe_signature(raw_bytes)
+    headers = {
+        "Content-Type": "application/json",
+        "Stripe-Signature": sig,
+    }
+    return raw_bytes, headers
+
 
 # ==============================================================================
 # 1. Background Usage Tracker Tests
@@ -154,7 +167,7 @@ async def test_stripe_webhook_upgrades_user_to_pro_and_cleans_cache(
     mock_redis: MockRedis,
     db_session: AsyncSession,
 ):
-    """Test Stripe webhook updates tier to PRO (50k quota, 50 req/s) and evicts Redis cache."""
+    """Test signed Stripe webhook updates tier to PRO (50k quota, 50 req/s) and evicts Redis cache."""
     # 1. Register user and create API key
     email = "upgrade_target@fintech.io"
     await async_client.post(
@@ -185,7 +198,7 @@ async def test_stripe_webhook_upgrades_user_to_pro_and_cleans_cache(
     user_res = await async_client.get("/api/v1/auth/me", headers=auth_header)
     user_id = user_res.json()["id"]
 
-    # 3. Simulate Stripe webhook payload
+    # 3. Simulate signed Stripe webhook payload
     webhook_payload = {
         "id": "evt_test_123456",
         "type": "checkout.session.completed",
@@ -199,9 +212,11 @@ async def test_stripe_webhook_upgrades_user_to_pro_and_cleans_cache(
         },
     }
 
+    raw_bytes, headers = _signed_webhook_post_args(webhook_payload)
     webhook_res = await async_client.post(
         "/api/v1/billing/webhook",
-        json=webhook_payload,
+        content=raw_bytes,
+        headers=headers,
     )
     assert webhook_res.status_code == 200
     res_data = webhook_res.json()
@@ -224,11 +239,37 @@ async def test_stripe_webhook_upgrades_user_to_pro_and_cleans_cache(
 
 
 @pytest.mark.asyncio
+async def test_stripe_webhook_rejects_missing_or_invalid_signature(
+    async_client: AsyncClient,
+):
+    """Test webhook rejects unsigned or forged requests with 401 INVALID_WEBHOOK_SIGNATURE."""
+    payload = {
+        "type": "checkout.session.completed",
+        "data": {"object": {"customer_email": "attacker@fintech.io"}},
+    }
+    res_missing = await async_client.post("/api/v1/billing/webhook", json=payload)
+    assert res_missing.status_code == 401
+    assert res_missing.json()["error_code"] == "INVALID_WEBHOOK_SIGNATURE"
+
+    res_forged = await async_client.post(
+        "/api/v1/billing/webhook",
+        json=payload,
+        headers={"Stripe-Signature": "t=12345,v1=deadbeef"},
+    )
+    assert res_forged.status_code == 401
+    assert res_forged.json()["error_code"] == "INVALID_WEBHOOK_SIGNATURE"
+
+
+@pytest.mark.asyncio
 async def test_stripe_webhook_ignored_events(async_client: AsyncClient):
     """Test webhook ignores non-checkout events gracefully."""
+    raw_bytes, headers = _signed_webhook_post_args(
+        {"type": "payment_intent.created", "data": {}}
+    )
     response = await async_client.post(
         "/api/v1/billing/webhook",
-        json={"type": "payment_intent.created", "data": {}},
+        content=raw_bytes,
+        headers=headers,
     )
     assert response.status_code == 200
     assert response.json()["status"] == "ignored"
@@ -236,10 +277,25 @@ async def test_stripe_webhook_ignored_events(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_stripe_webhook_invalid_payload(async_client: AsyncClient):
-    """Test webhook returns 400 when missing client reference and email."""
+    """Test webhook returns 400 when missing client reference and email or when data is null."""
+    raw_bytes, headers = _signed_webhook_post_args(
+        {"type": "checkout.session.completed", "data": {"object": {}}}
+    )
     response = await async_client.post(
         "/api/v1/billing/webhook",
-        json={"type": "checkout.session.completed", "data": {"object": {}}},
+        content=raw_bytes,
+        headers=headers,
     )
     assert response.status_code == 400
     assert response.json()["error_code"] == "INVALID_WEBHOOK_PAYLOAD"
+
+    raw_null, headers_null = _signed_webhook_post_args(
+        {"type": "checkout.session.completed", "data": None}
+    )
+    res_null = await async_client.post(
+        "/api/v1/billing/webhook",
+        content=raw_null,
+        headers=headers_null,
+    )
+    assert res_null.status_code == 400
+    assert res_null.json()["error_code"] == "INVALID_WEBHOOK_PAYLOAD"

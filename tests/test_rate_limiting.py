@@ -82,26 +82,35 @@ async def test_valid_api_key_injects_headers_and_caches_in_redis(
 
 
 @pytest.mark.asyncio
-async def test_rate_limit_threshold_triggers_429_with_retry_after(
+async def test_rate_limit_threshold_triggers_429_without_leaking_monthly_quota(
     async_client: AsyncClient,
+    mock_redis: MockRedis,
     registered_user_and_key: tuple[dict, str],
 ):
-    """Test making more requests than rate_limit_per_sec in the same second triggers 429."""
+    """Test making more requests than rate_limit_per_sec triggers 429 and does NOT consume monthly quota."""
     key_data, raw_key = registered_user_and_key
     headers = {"X-API-Key": raw_key}
 
     # Free plan allows 5 requests per second
+    user_id = None
     for i in range(5):
         res = await async_client.get("/api/v1/keys/verify", headers=headers)
         assert res.status_code == 200, f"Request {i + 1} should succeed"
+        user_id = res.json()["user_id"]
 
-    # 6th request within the same epoch second must be blocked with 429
-    blocked_res = await async_client.get("/api/v1/keys/verify", headers=headers)
-    assert blocked_res.status_code == 429
-    data = blocked_res.json()
-    assert data["error_code"] == "RATE_LIMIT_EXCEEDED"
-    assert "retry_after_seconds" in data["details"]
-    assert blocked_res.headers.get("retry-after") == "1"
+    # 6th and 7th requests within the same epoch second must be blocked with 429
+    for _ in range(2):
+        blocked_res = await async_client.get("/api/v1/keys/verify", headers=headers)
+        assert blocked_res.status_code == 429
+        data = blocked_res.json()
+        assert data["error_code"] == "RATE_LIMIT_EXCEEDED"
+        assert "retry_after_seconds" in data["details"]
+        assert blocked_res.headers.get("retry-after") == "1"
+
+    # Verify monthly quota counter in Redis is still 5 (not 7!)
+    year_month = datetime.now(UTC).strftime("%Y-%m")
+    quota_key = f"quota:{user_id}:{year_month}"
+    assert int(await mock_redis.get(quota_key) or 0) == 5
 
 
 @pytest.mark.asyncio

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     )
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    STRIPE_WEBHOOK_SECRET: str = "whsec_taxguard_dev_secret_key"
 
     # Database (PostgreSQL 16 via asyncpg)
     DATABASE_URL: str = (
