@@ -31,12 +31,12 @@
 
 Modern B2B onboarding suffers from high drop-off rates and fraud due to manual or delayed fiscal verification. **TaxGuard API** is built to solve this at scale:
 
-* **Instant Verification:** Validates Mexican RFCs (individuals, legal entities, and generic public) with mathematical Modulo 11 check digit verification and calendar date consistency (preventing impossible dates like February 30).
+* **Instant Verification:** Validates Mexican RFCs (individuals, legal entities, and generic public) with mathematical Modulo 11 check digit verification and calendar date consistency (preventing impossible dates like February 30 and future dates).
 * **Sub-10ms Postal Code Resolution:** Resolves country postal codes to state, municipality, and settlement lists with a 24-hour Redis memory cache.
 * **Corporate Email Deliverability Screening:** Screens out disposable inboxes and free public webmails while performing non-blocking DNS MX lookups.
 * **Carrier-Grade Rate Limiting:** Enforces per-second sliding window limits and monthly quota consumption in Redis with atomic pipelines, injecting standard `X-RateLimit-*` and `X-Quota-Remaining` headers.
 * **Asynchronous Audit Logging:** Captures response latency and status codes via FastAPI `BackgroundTasks` without blocking response delivery.
-* **Stripe Webhook Integration:** Automates real-time subscription tier migration (`FREE` $\rightarrow$ `PRO`) with atomic Redis cache eviction.
+* **Stripe Webhook Integration:** Automates real-time subscription tier migration (`FREE` $\rightarrow$ `PRO`) with HMAC-SHA256 `Stripe-Signature` verification and atomic Redis cache eviction.
 
 ---
 
@@ -89,7 +89,7 @@ flowchart TD
 
 ### 1. Sliding Window Rate Limiting & Atomic Quotas
 * Evaluated entirely in **Redis** before querying relational storage.
-* Executes atomic multi-command pipelines (`INCR` + `EXPIRE`).
+* Executes atomic multi-command pipelines (`INCR` + `EXPIRE`), ensuring rejected `429` bursts do not consume monthly quota.
 * Emits standard RFC rate limit headers:
   * `X-RateLimit-Limit`: Maximum requests allowed per second.
   * `X-RateLimit-Remaining`: Remaining capacity in the current second window.
@@ -104,8 +104,8 @@ flowchart TD
 
 ### 3. Mexican Fiscal ID (RFC) Verification Engine
 * Full support for **Persona Moral** (12 alphanumeric chars), **Persona Física** (13 alphanumeric chars), and **Público General** (`XAXX010101000`).
-* Validates Gregorian date consistency against calendar leap years.
-* Computes the official Mexican SAT **Modulo 11 check digit** using the official 3-character homoclave table.
+* Validates Gregorian date consistency against calendar leap years and rejects future registration dates.
+* Computes the official Mexican SAT **Modulo 11 check digit** using the official Anexo 20 character weight table (`0`–`9`, `A`–`N`, `&`, `O`–`Z`, space, `Ñ`).
 
 ### 4. Asynchronous Background Consumption Audit
 * Endpoint handlers dispatch asynchronous audit tracking via FastAPI `BackgroundTasks`.
@@ -128,7 +128,7 @@ flowchart TD
 ### Redis Keys
 
 * **`apikey:meta:{key_hash}`** $\rightarrow$ JSON metadata cache (`TTL: 300s`).
-* **`ratelimit:{api_key_id}:{epoch_second}`** $\rightarrow$ Atomic sliding second counter (`TTL: 1s`).
+* **`ratelimit:{api_key_id}:{epoch_second}`** $\rightarrow$ Atomic sliding second counter (`TTL: 2s`).
 * **`quota:{user_id}:{YYYY-MM}`** $\rightarrow$ Monthly consumption counter (`TTL: 35 days`).
 * **`catalog:zip:{country}:{postal_code}`** $\rightarrow$ Postal code directory cache (`TTL: 24h`).
 
@@ -149,11 +149,11 @@ taxguard-api/
 │   │       │   ├── auth.py        # Registration, login, /me profile
 │   │       │   ├── keys.py        # Key creation, listing, revocation, usage analytics
 │   │       │   ├── validators.py  # Tax ID, postal code, email, and batch validation
-│   │       │   └── billing.py     # Stripe checkout webhook integration
+│   │       │   └── billing.py     # Signed Stripe checkout webhook integration
 │   │       └── router.py          # Unified v1 API router
 │   ├── core/
 │   │   ├── config.py              # Pydantic Settings reading .env
-│   │   ├── security.py            # Bcrypt, JWT tokens, and SHA-256 API key hashing
+│   │   ├── security.py            # Bcrypt, JWT tokens, SHA-256 API keys & Stripe HMAC
 │   │   ├── rate_limit.py          # Redis sliding-window & quota enforcement engine
 │   │   └── exceptions.py          # RFC 7807 compliant standardized exception handlers
 │   ├── db/
@@ -209,11 +209,20 @@ curl -X GET http://localhost:8000/health
 ```json
 {
   "status": "healthy",
-  "environment": "development",
   "version": "0.1.0",
-  "database": "connected",
-  "redis": "connected",
-  "timestamp": "2026-10-24T06:30:00Z"
+  "environment": "development",
+  "services": {
+    "database": {
+      "status": "healthy",
+      "available": true,
+      "latency_ms": 2.72
+    },
+    "redis": {
+      "status": "healthy",
+      "available": true,
+      "latency_ms": 0.36
+    }
+  }
 }
 ```
 
@@ -266,7 +275,6 @@ X-Quota-Remaining: 999
 X-Request-ID: e6b45a27-7e61-464e-b52b-7c39fd9a1e0b
 
 {
-  "tax_id": "BBA830831LJ2",
   "valid": true,
   "entity_type": "LEGAL_ENTITY",
   "normalized_id": "BBA830831LJ2",
@@ -290,14 +298,16 @@ curl -i -X POST http://localhost:8000/api/v1/validate/postal-code \
 **Response (`200 OK`):**
 ```json
 {
-  "postal_code": "06000",
-  "country_code": "MX",
   "valid": true,
+  "country_code": "MX",
+  "postal_code": "06000",
   "state": "Ciudad de México",
+  "state_code": "CDMX",
   "municipality": "Cuauhtémoc",
   "city": "Ciudad de México",
   "settlements": ["Centro (Área 1)"],
-  "cached": true
+  "cached": true,
+  "errors": []
 }
 ```
 
@@ -315,14 +325,15 @@ curl -i -X POST http://localhost:8000/api/v1/validate/corporate-email \
 **Response (`200 OK`):**
 ```json
 {
-  "email": "compliance@stripe.com",
   "valid": true,
+  "email": "compliance@stripe.com",
   "domain": "stripe.com",
+  "syntax_valid": true,
   "is_corporate": true,
-  "is_disposable": false,
   "is_free_provider": false,
+  "is_disposable": false,
   "has_mx_records": true,
-  "mx_hosts": ["mxa-0014b201.gslb.pphosted.com"],
+  "mx_records": ["mxa-0014b201.gslb.pphosted.com"],
   "errors": []
 }
 ```
@@ -368,33 +379,28 @@ curl -X GET http://localhost:8000/api/v1/keys/usage \
 
 ---
 
-### 7. Stripe Plan Upgrade Webhook
+### 7. Signed Stripe Plan Upgrade Webhook
 
 ```bash
+PAYLOAD='{"id":"evt_live_test_01","type":"checkout.session.completed","data":{"object":{"id":"cs_live_session_123","customer":"cus_enterprise_999","client_reference_id":"<USER_UUID>","customer_email":"cto@fintech.io"}}}'
+SIG=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "whsec_taxguard_dev_secret_key" | awk '{print $NF}')
+
 curl -X POST http://localhost:8000/api/v1/billing/webhook \
   -H "Content-Type: application/json" \
-  -d '{
-    "id": "evt_live_test_01",
-    "type": "checkout.session.completed",
-    "data": {
-      "object": {
-        "id": "cs_live_session_123",
-        "customer": "cus_enterprise_999",
-        "client_reference_id": "<USER_UUID>",
-        "customer_email": "cto@fintech.io"
-      }
-    }
-  }'
+  -H "Stripe-Signature: $SIG" \
+  -d "$PAYLOAD"
 ```
 
 **Response (`200 OK`):**
 ```json
 {
   "status": "success",
+  "event": "checkout.session.completed",
+  "user_id": "<USER_UUID>",
   "tier": "PRO",
   "monthly_quota": 50000,
   "rate_limit_per_sec": 50,
-  "message": "User plan upgraded to PRO successfully."
+  "invalidated_keys_count": 1
 }
 ```
 
@@ -422,13 +428,13 @@ ruff format --check .
 
 * **`tests/test_health.py`**: Healthcheck introspection and request ID correlation headers.
 * **`tests/test_models.py`**: SQLAlchemy 2.0 ORM constraints, foreign keys, cascade deletes, and table indices.
-* **`tests/test_auth_and_keys.py`**: Bcrypt password hashing, JWT authorization, cryptographic key prefixing, and revocation.
-* **`tests/test_rate_limiting.py`**: Redis sliding window limits, atomic quota decrement, and `429 Too Many Requests` behavior.
-* **`tests/test_validators.py`**: SAT Modulo 11 check digits, impossible calendar dates, postal code cache, and MX DNS resolution.
-* **`tests/test_audit_and_billing.py`**: Asynchronous `BackgroundTasks` audit writing, usage metric aggregation, and Stripe plan upgrades.
+* **`tests/test_auth_and_keys.py`**: Bcrypt password hashing (including 72-byte boundaries), email normalization, JWT authorization, cryptographic key prefixing, and revocation.
+* **`tests/test_rate_limiting.py`**: Redis sliding window limits, non-leaking quota on `429`, atomic quota decrement, and `429 Too Many Requests` behavior.
+* **`tests/test_validators.py`**: Official SAT Anexo 20 Modulo 11 check digits (`A`–`Z`), impossible/future calendar dates, postal code cache, and MX DNS resolution.
+* **`tests/test_audit_and_billing.py`**: Asynchronous `BackgroundTasks` audit writing, usage metric aggregation, and HMAC-signed Stripe plan upgrades.
 * **`tests/test_e2e_integration.py`**: Complete end-to-end integration test spanning registration to key rotation and upgraded limits.
 
-**Total Tests:** **49 passed (100% success rate)**.
+**Total Tests:** **52 passed (100% success rate)**.
 
 ---
 
