@@ -32,8 +32,10 @@ async def register_user(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
     """Register a new user with an initial default FREE subscription tier."""
+    normalized_email = payload.email.strip().lower()
+
     # Check if user already exists
-    result = await db.execute(select(User).where(User.email == payload.email))
+    result = await db.execute(select(User).where(User.email == normalized_email))
     existing_user = result.scalar_one_or_none()
     if existing_user is not None:
         raise AppException(
@@ -45,7 +47,7 @@ async def register_user(
     # Hash password and create User entity
     hashed_pwd = get_password_hash(payload.password)
     user = User(
-        email=payload.email,
+        email=normalized_email,
         hashed_password=hashed_pwd,
         tier=UserTier.FREE,
         is_active=True,
@@ -80,7 +82,8 @@ async def login_user(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TokenResponse:
     """Authenticate email and password, issuing an access JWT."""
-    result = await db.execute(select(User).where(User.email == payload.email))
+    normalized_email = payload.email.strip().lower()
+    result = await db.execute(select(User).where(User.email == normalized_email))
     user = result.scalar_one_or_none()
 
     if user is None or not verify_password(payload.password, user.hashed_password):

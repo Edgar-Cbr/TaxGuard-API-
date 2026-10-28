@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.models.user import UserTier
 
@@ -13,15 +13,27 @@ class UserRegisterRequest(BaseModel):
 
     email: EmailStr
     password: str = Field(
-        min_length=8, description="User password (minimum 8 characters)"
+        min_length=8,
+        max_length=72,
+        description="User password (between 8 and 72 characters)",
     )
+
+    @field_validator("email", mode="after")
+    @classmethod
+    def normalize_email(cls, v: EmailStr) -> str:
+        return str(v).strip().lower()
 
 
 class UserLoginRequest(BaseModel):
     """Payload for user login."""
 
     email: EmailStr
-    password: str
+    password: str = Field(max_length=72)
+
+    @field_validator("email", mode="after")
+    @classmethod
+    def normalize_email(cls, v: EmailStr) -> str:
+        return str(v).strip().lower()
 
 
 class SubscriptionResponse(BaseModel):
