@@ -14,19 +14,19 @@ class Settings(BaseSettings):
 
     # Application Information
     PROJECT_NAME: str = "TaxGuard API"
-    VERSION: str = "1.1.0"
+    VERSION: str = "1.2.0"
     ENVIRONMENT: Literal["development", "staging", "production", "testing"] = (
         "development"
     )
     DEBUG: bool = False
     API_V1_STR: str = "/api/v1"
 
-    # Security & JWT
+    # Security & JWT (SEC-08: OWASP ASVS 3.5.1 session management)
     SECRET_KEY: str = (
         "super_secret_taxguard_key_for_development_purposes_only_replace_in_prod"
     )
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60  # 60 minutes session TTL
     STRIPE_WEBHOOK_SECRET: str = "whsec_taxguard_dev_secret_key"
 
     # Database (PostgreSQL 16 via asyncpg)
