@@ -17,19 +17,23 @@ from sqlalchemy.orm import selectinload
 from app.core.exceptions import AuthenticationException
 from app.core.rate_limit import (
     ApiKeyMetadata,
+    check_auth_rate_limit,
     check_rate_limit_and_quota,
     get_api_key_metadata,
 )
 from app.core.redis import get_redis_client
-from app.core.security import decode_access_token, hash_api_key
+from app.core.security import decode_access_token, hash_api_key, is_token_revoked
 from app.db.session import get_db
 from app.models.user import User
 
 __all__ = [
     "api_key_header_scheme",
+    "get_client_ip",
     "get_current_user",
     "get_db",
     "get_redis",
+    "rate_limit_auth",
+    "security_bearer",
     "verify_api_key_and_quota",
 ]
 
@@ -47,9 +51,33 @@ api_key_header_scheme = APIKeyHeader(
 )
 
 
+def get_client_ip(request: Request) -> str:
+    """Extract client IP address safely, respecting X-Forwarded-For if available."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "127.0.0.1"
+
+
 async def get_redis() -> Redis:
     """Dependency for obtaining an async Redis client."""
     return get_redis_client()
+
+
+async def rate_limit_auth(
+    request: Request,
+    redis_client: Annotated[Redis, Depends(get_redis)],
+) -> None:
+    """Enforce IP-based rate limiting on sensitive authentication endpoints (SEC-05)."""
+    client_ip = get_client_ip(request)
+    endpoint = request.url.path.strip("/").split("/")[-1] or "auth"
+    await check_auth_rate_limit(
+        client_ip=client_ip,
+        action=endpoint,
+        redis_client=redis_client,
+        max_requests=10,
+        window_seconds=60,
+    )
 
 
 async def get_current_user(
@@ -57,6 +85,7 @@ async def get_current_user(
         HTTPAuthorizationCredentials | None, Security(security_bearer)
     ],
     db: Annotated[AsyncSession, Depends(get_db)],
+    redis_client: Annotated[Redis, Depends(get_redis)],
 ) -> User:
     """Validate Bearer JWT and retrieve authenticated User from database."""
     if credentials is None or not credentials.credentials:
@@ -71,6 +100,14 @@ async def get_current_user(
         raise AuthenticationException(
             message="Token payload is missing subject claim",
             error_code="INVALID_TOKEN",
+        )
+
+    # Check token revocation blacklist in Redis (SEC-08)
+    jti = payload.get("jti")
+    if jti and await is_token_revoked(jti, redis_client):
+        raise AuthenticationException(
+            message="Token has been revoked",
+            error_code="TOKEN_REVOKED",
         )
 
     try:
