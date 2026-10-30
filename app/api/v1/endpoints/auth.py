@@ -1,15 +1,28 @@
-"""Authentication router: User registration, login, and profile."""
+"""Authentication router: User registration, login, logout, and profile."""
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Security, status
+from fastapi.security import HTTPAuthorizationCredentials
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import (
+    get_current_user,
+    get_db,
+    get_redis,
+    rate_limit_auth,
+    security_bearer,
+)
 from app.core.exceptions import AppException, AuthenticationException
-from app.core.security import create_access_token, get_password_hash, verify_password
+from app.core.security import (
+    create_access_token,
+    get_password_hash,
+    revoke_access_token,
+    verify_password,
+)
 from app.models.user import Subscription, User, UserTier
 from app.schemas.auth import (
     TokenResponse,
@@ -26,6 +39,7 @@ router = APIRouter()
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Register a new user account",
+    dependencies=[Depends(rate_limit_auth)],
 )
 async def register_user(
     payload: UserRegisterRequest,
@@ -76,6 +90,7 @@ async def register_user(
     "/login",
     response_model=TokenResponse,
     summary="Authenticate user and issue JWT",
+    dependencies=[Depends(rate_limit_auth)],
 )
 async def login_user(
     payload: UserLoginRequest,
@@ -100,6 +115,24 @@ async def login_user(
 
     access_token = create_access_token(subject=user.id)
     return TokenResponse(access_token=access_token, token_type="bearer")
+
+
+@router.post(
+    "/logout",
+    status_code=status.HTTP_200_OK,
+    summary="Revoke current JWT access token",
+)
+async def logout_user(
+    current_user: Annotated[User, Depends(get_current_user)],
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Security(security_bearer)
+    ],
+    redis_client: Annotated[Redis, Depends(get_redis)],
+) -> dict[str, str]:
+    """Blacklist the active JWT access token until its natural expiration (SEC-08)."""
+    if credentials and credentials.credentials:
+        await revoke_access_token(credentials.credentials, redis_client)
+    return {"message": "Successfully logged out."}
 
 
 @router.get(

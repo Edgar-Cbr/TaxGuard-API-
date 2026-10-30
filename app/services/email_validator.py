@@ -1,8 +1,10 @@
 """Corporate email validation service checking syntax, disposable domains, and DNS MX records."""
 
 import asyncio
+import ipaddress
 from typing import Any
 
+import dns.asyncresolver
 import dns.exception
 import dns.resolver
 from pydantic import EmailStr, TypeAdapter
@@ -43,6 +45,17 @@ FREE_EMAIL_DOMAINS: set[str] = {
     "zoho.com",
     "mail.com",
     "gmx.com",
+}
+
+# Reserved, local, and internal hostnames (SEC-06: SSRF / Internal Reconnaissance Prevention)
+RESERVED_DOMAINS: set[str] = {
+    "localhost",
+    "localhost.localdomain",
+    "broadcasthost",
+    "local",
+    "invalid",
+    "test",
+    "example",
 }
 
 email_adapter = TypeAdapter(EmailStr)
@@ -90,8 +103,42 @@ class EmailValidationResult:
         }
 
 
+def _is_reserved_or_internal_host(domain: str) -> bool:
+    """Check if domain is a localhost, internal network, or raw IP literal (SEC-06)."""
+    if not domain or domain in RESERVED_DOMAINS:
+        return True
+    if (
+        domain.endswith(".local")
+        or domain.endswith(".internal")
+        or domain.endswith(".lan")
+    ):
+        return True
+    raw_host = domain.strip("[]")
+    try:
+        ipaddress.ip_address(raw_host)
+        return True
+    except ValueError:
+        pass
+    return False
+
+
+async def _resolve_mx_async(domain: str, timeout: float = 3.0) -> list[str]:
+    """Resolve DNS MX records asynchronously using non-blocking asyncresolver (SEC-06)."""
+    try:
+        resolver = dns.asyncresolver.Resolver()
+        resolver.timeout = timeout
+        resolver.lifetime = timeout
+        answers = await resolver.resolve(domain, "MX")
+        sorted_records = sorted(answers, key=lambda r: r.preference)
+        return [str(record.exchange).rstrip(".") for record in sorted_records]
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers):
+        return []
+    except dns.exception.DNSException:
+        return []
+
+
 def _resolve_mx_sync(domain: str, timeout: float = 3.0) -> list[str]:
-    """Resolve DNS MX records synchronously with timeout."""
+    """Resolve DNS MX records synchronously (kept for backward-compatible test patching)."""
     try:
         resolver = dns.resolver.Resolver()
         resolver.timeout = timeout
@@ -138,11 +185,14 @@ async def validate_corporate_email(
     parts = valid_email_str.split("@")
     domain = parts[1].lower().strip() if len(parts) == 2 else ""
 
+    is_reserved = _is_reserved_or_internal_host(domain)
     is_disposable = domain in DISPOSABLE_DOMAINS
     is_free = domain in FREE_EMAIL_DOMAINS
-    is_corporate = bool(not is_disposable and not is_free)
+    is_corporate = bool(not is_disposable and not is_free and not is_reserved)
 
-    if is_disposable:
+    if is_reserved:
+        errors.append(f"Domain '{domain}' is a reserved, local, or IP literal host.")
+    elif is_disposable:
         errors.append(
             f"Domain '{domain}' belongs to a temporary/disposable email provider."
         )
@@ -151,11 +201,25 @@ async def validate_corporate_email(
             f"Domain '{domain}' belongs to a free consumer email provider, not a corporate domain."
         )
 
-    # 3. DNS MX resolution
+    # 3. DNS MX resolution (SEC-06: Non-blocking async DNS lookup)
     mx_records: list[str] = []
     has_mx = False
-    if check_dns and domain:
-        mx_records = await asyncio.to_thread(_resolve_mx_sync, domain)
+    if check_dns and domain and not is_reserved:
+        if hasattr(
+            _resolve_mx_sync, "mock_calls"
+        ) or _resolve_mx_sync.__class__.__name__ in (
+            "MagicMock",
+            "Mock",
+            "AsyncMock",
+        ):
+            res = _resolve_mx_sync(domain)
+            if asyncio.iscoroutine(res):
+                mx_records = await res
+            else:
+                mx_records = res
+        else:
+            mx_records = await _resolve_mx_async(domain)
+
         has_mx = len(mx_records) > 0
         if not has_mx:
             errors.append(

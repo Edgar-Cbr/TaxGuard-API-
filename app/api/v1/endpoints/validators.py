@@ -3,11 +3,11 @@
 import time
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
 from redis.asyncio import Redis
 
 from app.api.deps import get_redis, verify_api_key_and_quota
-from app.core.rate_limit import ApiKeyMetadata
+from app.core.rate_limit import ApiKeyMetadata, check_and_consume_batch_quota
 from app.schemas.validator import (
     BatchValidationRequest,
     BatchValidationResponse,
@@ -155,8 +155,22 @@ async def validate_batch_endpoint(
     redis_client: Annotated[Redis, Depends(get_redis)],
     background_tasks: BackgroundTasks,
     request: Request,
+    response: Response,
 ) -> BatchValidationResponse:
-    """Batch validation endpoint for enterprise onboarding pipelines."""
+    """Batch validation endpoint for enterprise onboarding pipelines.
+
+    Consumes 1 monthly quota point per item in the batch (SEC-03: OWASP API4:2023).
+    """
+    total_items = len(payload.tax_ids) + len(payload.postal_codes) + len(payload.emails)
+    if total_items > 1:
+        remaining_quota = await check_and_consume_batch_quota(
+            user_id=auth.user_id,
+            additional_count=total_items - 1,
+            monthly_quota=auth.monthly_quota,
+            redis_client=redis_client,
+        )
+        response.headers["X-Quota-Remaining"] = str(remaining_quota)
+
     start_time = time.perf_counter()
 
     # 1. Validate Tax IDs
