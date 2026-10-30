@@ -50,6 +50,10 @@ class MockPipeline:
         self._commands.append(("incr", key, amount))
         return self
 
+    def incrby(self, key: str, amount: int):
+        self._commands.append(("incr", key, amount))
+        return self
+
     def expire(self, key: str, seconds: int):
         self._commands.append(("expire", key, seconds))
         return self
@@ -93,6 +97,12 @@ class MockRedis:
         current = int(self._store.get(key, 0)) + amount
         self._store[key] = str(current)
         return current
+
+    async def incrby(self, key: str, amount: int = 1) -> int:
+        return await self.incr(key, amount)
+
+    async def exists(self, *keys: str) -> int:
+        return sum(1 for k in keys if k in self._store)
 
     async def delete(self, *keys: str) -> int:
         count = 0

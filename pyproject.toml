@@ -1,6 +1,6 @@
 [project]
 name = "taxguard-api"
-version = "1.1.0"
+version = "1.2.0"
 description = "High-performance B2B Micro-SaaS API for fiscal ID (RFC/TIN), postal address & corporate email validation."
 readme = "README.md"
 requires-python = ">=3.12"

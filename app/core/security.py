@@ -37,7 +37,7 @@ def create_access_token(
     subject: str | Any,
     expires_delta: timedelta | None = None,
 ) -> str:
-    """Generate signed JWT access token for authentication."""
+    """Generate signed JWT access token with unique JTI for revocation tracking."""
     if expires_delta:
         expire = datetime.now(UTC) + expires_delta
     else:
@@ -45,10 +45,12 @@ def create_access_token(
             minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
         )
 
+    jti = secrets.token_hex(16)
     to_encode = {
         "exp": expire,
         "sub": str(subject),
         "iat": datetime.now(UTC),
+        "jti": jti,
     }
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
@@ -67,6 +69,29 @@ def decode_access_token(token: str) -> dict[str, Any]:
             message="Could not validate credentials",
             error_code="INVALID_TOKEN",
         ) from exc
+
+
+async def revoke_access_token(token: str, redis_client: Any) -> None:
+    """Blacklist a JWT access token in Redis using its jti claim until expiration (SEC-08)."""
+    try:
+        payload = decode_access_token(token)
+        jti = payload.get("jti")
+        exp = payload.get("exp")
+        if jti and exp:
+            now_ts = int(datetime.now(UTC).timestamp())
+            ttl = max(int(exp - now_ts), 60)
+            await redis_client.setex(f"blacklist:token:{jti}", ttl, "1")
+    except Exception:
+        pass
+
+
+async def is_token_revoked(jti: str, redis_client: Any) -> bool:
+    """Check if token jti is present in Redis blacklist (SEC-08)."""
+    try:
+        val = await redis_client.get(f"blacklist:token:{jti}")
+        return val is not None
+    except Exception:
+        return False
 
 
 def generate_api_key() -> tuple[str, str, str]:
@@ -111,8 +136,12 @@ def verify_stripe_signature(
     payload_bytes: bytes,
     sig_header: str | None,
     secret: str | None = None,
+    tolerance: int = 300,
 ) -> bool:
-    """Verify HMAC-SHA256 Stripe-Signature header (`t=<ts>,v1=<sig>` or raw hex digest)."""
+    """Verify HMAC-SHA256 Stripe-Signature header (`t=<ts>,v1=<sig>` or raw hex digest).
+
+    SEC-04: Replay attack prevention with a configurable tolerance window (default 300 seconds).
+    """
     if not sig_header or not sig_header.strip():
         return False
 
@@ -126,6 +155,15 @@ def verify_stripe_signature(
         v1_sig = parts.get("v1", "")
         if not ts_str or not v1_sig:
             return False
+
+        # Replay attack prevention: verify timestamp is within tolerance window
+        try:
+            ts = int(ts_str)
+            if abs(int(time.time()) - ts) > tolerance:
+                return False
+        except (ValueError, TypeError):
+            return False
+
         signed_payload = f"{ts_str}.".encode() + payload_bytes
         expected = hmac.new(
             webhook_secret.encode("utf-8"),
