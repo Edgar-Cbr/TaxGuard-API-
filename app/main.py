@@ -30,7 +30,7 @@ class RootInfoResponse(BaseModel):
     """Root API metadata and documentation discovery links."""
 
     name: str = Field(examples=["TaxGuard API"])
-    version: str = Field(examples=["1.1.0"])
+    version: str = Field(examples=["1.2.0"])
     environment: str = Field(examples=["development"])
     documentation: str = Field(examples=["/docs"])
     redoc: str = Field(examples=["/redoc"])
@@ -58,7 +58,7 @@ class HealthCheckResponse(BaseModel):
     """System healthcheck payload."""
 
     status: str = Field(examples=["healthy"])
-    version: str = Field(examples=["1.1.0"])
+    version: str = Field(examples=["1.2.0"])
     environment: str = Field(examples=["development"])
     services: HealthServicesMap
 
@@ -112,11 +112,12 @@ def create_application() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS Middleware with exposed rate-limiting & tracing headers for browser clients
+    # CORS Middleware (SEC-02: Prevent credential reflection when wildcard origin is allowed)
+    allow_credentials = "*" not in settings.CORS_ORIGINS
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
-        allow_credentials=True,
+        allow_credentials=allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=[
@@ -128,13 +129,19 @@ def create_application() -> FastAPI:
         ],
     )
 
-    # Request ID and Request Logging Middleware
+    # Context & Defensive Security Headers Middleware (SEC-07: OWASP ASVS 14.4)
     @application.middleware("http")
-    async def request_context_middleware(request: Request, call_next):
+    async def request_context_and_security_middleware(request: Request, call_next):
         request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
         request.state.request_id = request_id
         response: Response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
         return response
 
     # Global Exception Handlers (RFC 7807 compliant)
